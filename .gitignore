@@ -1,5 +1,6 @@
 waveform
+*.png
 *.mp3
 *.swp
 *.swo
-audio/
+test/
