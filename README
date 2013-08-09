@@ -1,0 +1,50 @@
+TODO: make this readme accurate
+
+Command Line Usage:
+
+    waveform [options] audiofile pngfile
+
+    Available options with their defaults:
+    --width 256                 width of the image
+    --height 64                 height of the image
+    --color-bg 00000000         bg color, rrggbbaa
+    --color-center 000000ff     gradient center color, rrggbbaa
+    --color-outer 000000ff      gradient outer color, rrggbbaa
+    --quality 100               integer 1-100 choose between speed and quality
+
+Node.js Usage:
+
+    var generateWaveform = require('waveform');
+    generateWaveform(audiofile, pngfile, {
+        width: 256,                // width of the image
+        height: 64,                // height of the image
+        'color-bg': '00000000',    // bg color, rrggbbaa
+        'color-center': '000000ff',// gradient center color, rrggbbaa
+        'color-outer': '000000ff', // gradient outer color, rrggbbaa
+        quality: 100,              // integer 1-100 choose between speed and quality
+    }, function(err) {
+        // done generating waveform
+    });
+
+Ports Dependencies:
+
+    audio/sndfile
+    audio/mpg123
+    graphic/png
+    zlib
+
+Compile on FreeBSD:
+
+    gcc -I/usr/local/include -L/usr/local/lib -o waveform main.c -O3 -lsndfile -lmpg123 -lz -lpng
+
+TODO:
+
+    add alias arguments -w -h -q
+    add arguments --color-left-bg --color-left-center --color-left-outer
+                  --color-right-bg --color-right-center --color-right-outer
+                  --stereo -s
+    add stereo waveform generation
+        only draw stereo waveforms on --stereo or -s for backwards compatability
+        revert to mono waveform if input file is not stereo
+    benchmark with various file types, bitrates, lengths, channels, etc
+    check for leaks and whatnot
