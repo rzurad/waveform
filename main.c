@@ -112,8 +112,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (!in_file_path || !out_file_path) {
-        fprintf(stderr, "input and output file parameters required\n");
+    if (!in_file_path) {
+        fprintf(stderr, "input file parameters required\n");
 
         return exit_usage();
     }
@@ -136,7 +136,7 @@ int main(int argc, char *argv[]) {
     SNDFILE *sndfile = sf_open(in_file_path, SFM_READ, &sf_info);
 
     if (sndfile) {
-        fprintf(stdout, "using sndfile\n");
+        //fprintf(stdout, "using sndfile\n");
 
         // sndfile can handle the file
         frame_count = sf_info.frames;
@@ -167,7 +167,7 @@ int main(int argc, char *argv[]) {
         }
 
         // mpg123 can handle the file
-        fprintf(stdout, "using mpg123\n");
+        //fprintf(stdout, "using mpg123\n");
 
         // forget about variable bitrates. to make things easier, clear
         // mpg123's output encodings table and have the only allowed output
@@ -180,10 +180,12 @@ int main(int argc, char *argv[]) {
 
         int sample_count = mpg123_length(mh);
 
+        /*
         fprintf(stdout, "encodeing: %i\n", encoding);
         fprintf(stdout, "rate: %li\n", rate);
         fprintf(stdout, "channel count: %i\n", channel_count);
         fprintf(stdout, "sample count: %i\n", sample_count);
+        */
 
         frame_count = sample_count / channel_count;
     }
@@ -197,13 +199,25 @@ int main(int argc, char *argv[]) {
     int sample_max = SHRT_MAX;
     int sample_range = sample_max - sample_min;
 
+    /*
     fprintf(stdout, "frame count:  %i\n", frame_count);
     fprintf(stdout, "sample range: %i\n", sample_range);
+    */
 
     // set up the output png
     int center_y = image_height / 2;
+    FILE *png_file;
 
-    FILE *png_file = fopen(out_file_path, "wb");
+    if (out_file_path) {
+        png_file = fopen(out_file_path, "wb");
+
+        if (!png_file) {
+            fprintf(stderr, "Unable to open %s for writing\n", out_file_path);
+            return 1;
+        }
+    } else {
+        png_file = stdout;
+    }
 
     if (!png_file) {
         fprintf(stderr, "Unable to open %s for writing\n", out_file_path);
@@ -250,8 +264,6 @@ int main(int argc, char *argv[]) {
         PNG_COMPRESSION_TYPE_DEFAULT,
         PNG_FILTER_TYPE_DEFAULT
     );
-
-    png_write_info(png, png_info);
 
 
     // how many audio frames fit in one pixel width
@@ -381,6 +393,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    png_write_info(png, png_info);
     png_write_image(png, row_pointers);
     png_write_end(png, png_info);
 
