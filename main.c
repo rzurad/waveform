@@ -1,10 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <sndfile.h>
 #include <mpg123.h>
 #include <png.h>
+
 #include <limits.h>
+
+int verbose = 0;
 
 int exit_usage() {
     fprintf(stderr, "\
@@ -38,6 +42,12 @@ void parse_color(const char *hex_str, png_bytep color) {
     color[2] = value & 0xff; value >>= 8;
     color[1] = value & 0xff; value >>= 8;
     color[0] = value & 0xff;
+}
+
+void log_message(char *msg) {
+    if (verbose) {
+        fprintf(stdout, "%s", msg);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -78,10 +88,9 @@ int main(int argc, char *argv[]) {
         } else {
             char *arg_name = argv[i] + 2;
 
-            // args that take 1 parameter
-            if (i + 1 >= argc)
-                return exit_usage();
-            if (strcmp(arg_name, "width") == 0) {
+            if (strcmp(arg_name, "verbose") == 0) {
+                verbose = 1;
+            } else if (strcmp(arg_name, "width") == 0) {
                 image_width = atol(argv[++i]);
             } else if (strcmp(arg_name, "height") == 0) {
                 image_height = atol(argv[++i]);
@@ -136,13 +145,18 @@ int main(int argc, char *argv[]) {
     SNDFILE *sndfile = sf_open(in_file_path, SFM_READ, &sf_info);
 
     if (sndfile) {
-        //fprintf(stdout, "using sndfile\n");
+        log_message("using sndfile\n");
 
         // sndfile can handle the file
         frame_count = sf_info.frames;
         channel_count = sf_info.channels;
     } else {
         // sndfile no good. let's try mpg123.
+        // after we verbosly tell why sndfile failed
+        if (verbose) {
+            fprintf(stdout, "sndfile failed: %s\n", sf_strerror(sndfile));
+        }
+
         int err = mpg123_init();
         int encoding = 0;
         long rate = 0;
@@ -167,7 +181,7 @@ int main(int argc, char *argv[]) {
         }
 
         // mpg123 can handle the file
-        //fprintf(stdout, "using mpg123\n");
+        log_message("using mpg123\n");
 
         // forget about variable bitrates. to make things easier, clear
         // mpg123's output encodings table and have the only allowed output
@@ -180,12 +194,12 @@ int main(int argc, char *argv[]) {
 
         int sample_count = mpg123_length(mh);
 
-        /*
-        fprintf(stdout, "encodeing: %i\n", encoding);
-        fprintf(stdout, "rate: %li\n", rate);
-        fprintf(stdout, "channel count: %i\n", channel_count);
-        fprintf(stdout, "sample count: %i\n", sample_count);
-        */
+        if (verbose) {
+            fprintf(stdout, "encodeing: %i\n", encoding);
+            fprintf(stdout, "rate: %li\n", rate);
+            fprintf(stdout, "channel count: %i\n", channel_count);
+            fprintf(stdout, "sample count: %i\n", sample_count);
+        }
 
         frame_count = sample_count / channel_count;
     }
@@ -199,10 +213,10 @@ int main(int argc, char *argv[]) {
     int sample_max = SHRT_MAX;
     int sample_range = sample_max - sample_min;
 
-    /*
-    fprintf(stdout, "frame count:  %i\n", frame_count);
-    fprintf(stdout, "sample range: %i\n", sample_range);
-    */
+    if (verbose) {
+        fprintf(stdout, "frame count:  %i\n", frame_count);
+        fprintf(stdout, "sample range: %i\n", sample_range);
+    }
 
     // set up the output png
     int center_y = image_height / 2;
@@ -393,9 +407,19 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (verbose && !out_file_path) {
+        printf("\nBegin PNG output\n");
+        printf("==========================================================\n");
+    }
+
     png_write_info(png, png_info);
     png_write_image(png, row_pointers);
     png_write_end(png, png_info);
+
+    if (verbose && !out_file_path) {
+        printf("==========================================================\n");
+        printf("End PNG output\n");
+    }
 
     // free memory
     png_destroy_write_struct(&png, &png_info);
@@ -408,6 +432,8 @@ int main(int argc, char *argv[]) {
         mpg123_delete(mh);
         mpg123_exit();
     }
+
+    log_message("\n===== SUCCESS!!! ======\n");
 
     // let the OS free up the memory that we allocated
     return 0;

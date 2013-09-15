@@ -1,4 +1,7 @@
 waveform
+waveform2
+readaudio
+*.core
 *.png
 *.mp3
 *.swp
