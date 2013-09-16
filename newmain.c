@@ -96,6 +96,16 @@ void draw_png(WaveformPNG *png,
         }
     }
 
+    //for the range of samples that fit inside one pixel
+    //  get the left channel (8bit samples, 16bit depth, 2 channels means
+    //      the left channel is the first 2 samples
+    //      the right channel is the next two samples
+    //
+    //      we could potentially average the channels
+    //      and then for the range of samples inside this column of pixels
+    //      find the min sample, the max sample, and the average sample
+    //
+    //      plot them.
     /*
     int image_bound_y = image_height - 1;
     float channel_count_multiplier = 1 / (float) channel_count;
@@ -117,19 +127,22 @@ int main(int argc, char *argv[]) {
         die("Please provide the file path as the first argument");
     }
 
-    /**
-     * register all availible muxers/demuxers/protocols
-     */
-    av_register_all(); // http://ffmpeg.org/doxygen/trunk/group__lavf__core.html#ga917265caec45ef5a0646356ed1a507e3
+    // We could be fed any number of types of audio containers with any number of
+    // encodings. These functions tell ffmpeg to load every library it knows about.
+    // This way we don't need to explicity tell ffmpeg which libraries to load.
 
-    /**
-     * register all codecs/parsers/bitstream-filters
-     */
-    avcodec_register_all(); // http://ffmpeg.org/doxygen/trunk/group__lavc__core.html#gaf1a2bb4e7c7611c131bb6212bf0fa639
+    // Register all availible muxers/demuxers/protocols. We could be fed any
+    // http://ffmpeg.org/doxygen/trunk/group__lavf__core.html#ga917265caec45ef5a0646356ed1a507e3
+    av_register_all(); 
+
+    // register all codecs/parsers/bitstream-filters
+    // http://ffmpeg.org/doxygen/trunk/group__lavc__core.html#gaf1a2bb4e7c7611c131bb6212bf0fa639
+    avcodec_register_all();
 
     // "It's important for this to be aligned correctly..."
     // Yeah, I wish you fucking told me why...
-    AVFormatContext *pFormatContext __attribute__ ((aligned (16))) = 0; // http://ffmpeg.org/doxygen/trunk/structAVFormatContext.html
+    // http://ffmpeg.org/doxygen/trunk/structAVFormatContext.html
+    AVFormatContext *pFormatContext __attribute__ ((aligned (16))) = 0;
     AVCodec *pDecoder; // http://ffmpeg.org/doxygen/trunk/structAVCodec.html
     AVCodecContext *pDecoderContext; // http://ffmpeg.org/doxygen/trunk/structAVCodecContext.html
     int stream_index; // which stream from the file we care about
