@@ -384,6 +384,7 @@ int main(int argc, char *argv[]) {
             if (value > max) max = value;
         }
 
+        fprintf(stdout, "Pixel Column %x: min %i, max %i\n", x, min, max);
         // translate into y pixel coord.
         int y_min = (min - sample_min) * image_bound_y / sample_range;
         int y_max = (max - sample_min) * image_bound_y / sample_range;

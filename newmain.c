@@ -70,15 +70,41 @@ void write_and_close_png(WaveformPNG *pWaveformPNG) {
     fclose(pWaveformPNG->pPNGFile);
 }
 
+// 8bit_index = channel_count * byte_depth * 16bit_index
+// 
+uint8_t extract_sample_8bit(int index, uint8_t *samples, int channel_count) {
+    uint8_t raw = 0;
+    float channel_average_multiplier = 1 / (float) channel_count;
+    int c;
+
+    for (c = 0; c < channel_count; ++c) {
+        raw += samples[index + c] * channel_average_multiplier;
+    }
+
+    return raw;
+}
+
+uint16_t extract_sample_16bit(int index, uint8_t *samples, int channel_count) {
+    uint16_t raw = 0;
+    float channel_average_multiplier = 1 / (float) channel_count;
+    int c;
+
+    for (c = 0; c < channel_count; ++c) {
+        raw += ((uint16_t *) samples)[index + c] * channel_average_multiplier;
+    }
+
+    return raw;
+}
+
 void draw_png(WaveformPNG *png,
               uint8_t *samples,
-              int data_size,
+              int data_size, //the length of samples
               size_t bytes_per_sample,
               int channel_count
         ) {
 
     int center_y = png->height / 2;
-    int sample_count = data_size / (bytes_per_sample * channel_count);
+    int sample_count = data_size / bytes_per_sample;
     int samples_per_pixel = sample_count / png->width;
     int i, x, y; //loop counters
 
@@ -96,16 +122,48 @@ void draw_png(WaveformPNG *png,
         }
     }
 
-    //for the range of samples that fit inside one pixel
-    //  get the left channel (8bit samples, 16bit depth, 2 channels means
-    //      the left channel is the first 2 samples
-    //      the right channel is the next two samples
-    //
-    //      we could potentially average the channels
-    //      and then for the range of samples inside this column of pixels
-    //      find the min sample, the max sample, and the average sample
-    //
-    //      plot them.
+    // for each column of pixels in the final output image
+    for (x = 0; x < png->width; ++x) {
+        float average = 0;
+        float average_multiplier = 1.0 / png->width;
+        int min = 0;
+        int max = 0;
+
+        //for each "sample", which is really a sample for each channel,
+        //reduce the samples * channels value to a single value that is
+        //the average of the samples for each channel.
+        for (i = 0; i < samples_per_pixel; ++i) {
+            int value = 0;
+
+            switch (bytes_per_sample) {
+                // 8-bit depth
+                case 1:
+                    value = (int) extract_sample_8bit(i, samples, channel_count);
+                    break;
+
+                // 16-bit depth
+                case 2:
+                    value = (int) extract_sample_16bit(i, samples, channel_count);
+                    //fprintf(stdout, "value: %i\n", value);
+                    break;
+
+                // 24-bit depth
+                default:
+                    fprintf(
+                        stderr,
+                        "Encountered file with %i-bit depth. I don't know what to do.",
+                        (int) bytes_per_sample * 8
+                    );
+            }
+
+            if (value < min) min = value;
+            if (value > max) max = value;
+
+            average += value * average_multiplier;
+        }
+
+        fprintf(stdout, "Pixel Column %i: min %i, max %i, average %f\n", x, min, max, average);
+    }
     /*
     int image_bound_y = image_height - 1;
     float channel_count_multiplier = 1 / (float) channel_count;
@@ -239,6 +297,7 @@ int main(int argc, char *argv[]) {
                 1
             );
 
+            fwrite(pFrame->data[0], 1, data_size, stdout);
             if (total_data_size + data_size > allocated_buffer_size) {
                 allocated_buffer_size = allocated_buffer_size * 1.25;
                 samples = realloc(samples, allocated_buffer_size);
@@ -256,14 +315,14 @@ int main(int argc, char *argv[]) {
         av_free_packet(&packet);
     }
 
-
+    return 0;
     /** DEBUG **/
     av_dump_format(pFormatContext, 0, pFilePath, 0);
     fprintf(stdout, "sample_size: %i\n", (int) bytes_per_sample);
     fprintf(stdout, "is_planar: %i\n", av_sample_fmt_is_planar(pDecoderContext->sample_fmt));
     fprintf(stdout, "allocated_buffer_size: %i\n", allocated_buffer_size);
     fprintf(stdout, "total_data_size: %i\n", total_data_size);
-    fprintf(stdout, "sample_count: %i\n", sample_count * channel_count);
+    fprintf(stdout, "sample_count: %i\n", sample_count);
     fprintf(stdout, "sample rate: %i\n", pDecoderContext->sample_rate);
     fprintf(stdout, "channels: %i\n", channel_count);
     fprintf(stdout, "frame size: %i\n", pDecoderContext->frame_size);
