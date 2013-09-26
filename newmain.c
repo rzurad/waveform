@@ -96,6 +96,21 @@ uint16_t extract_sample_16bit(int index, uint8_t *samples, int channel_count) {
     return raw;
 }
 
+int count = 0;
+
+void print_frame(const AVFrame *frame) {
+    const int n = frame->nb_samples * av_get_channel_layout_nb_channels(av_frame_get_channel_layout(frame));
+    const int16_t *p = (int16_t *)frame->data[0];
+    const int16_t *p_end = p + n;
+
+    while (p < p_end && count < 44100) {
+        fprintf(stdout, "%i: %i\n", count, (int) *p);
+        p++;
+        count++;
+    }
+    fflush(stdout);
+}
+
 void draw_png(WaveformPNG *png,
               uint8_t *samples,
               int data_size, //the length of samples
@@ -135,6 +150,8 @@ void draw_png(WaveformPNG *png,
         for (i = 0; i < samples_per_pixel; ++i) {
             int value = 0;
 
+
+
             switch (bytes_per_sample) {
                 // 8-bit depth
                 case 1:
@@ -156,6 +173,8 @@ void draw_png(WaveformPNG *png,
                     );
             }
 
+            //if (FUCKIN_LOOP_COUNTS_AND_SHIT < 44100) {
+            //    fprintf(stdout, "sample %i: %i", 
             if (value < min) min = value;
             if (value > max) max = value;
 
@@ -277,6 +296,8 @@ int main(int argc, char *argv[]) {
         avcodec_get_frame_defaults(pFrame);
     }
 
+    int BLOOPS_AND_LOOPS = 0;
+
     //http://ffmpeg.org/doxygen/trunk/group__lavf__decoding.html#ga4fdb3084415a82e3810de6ee60e46a61
     while (av_read_frame(pFormatContext, &packet) == 0) {
         int frame_finished = 0;
@@ -288,6 +309,7 @@ int main(int argc, char *argv[]) {
         //we need to get a copy of the array of sample data and pass it to a function that
         //will draw the png
         if (frame_finished) {
+            print_frame(pFrame);
             //http://ffmpeg.org/doxygen/trunk/samplefmt_8c.html#aa7368bc4e3a366b688e81938ed55eb06
             int data_size = av_samples_get_buffer_size(
                 &plane_size,
@@ -297,7 +319,6 @@ int main(int argc, char *argv[]) {
                 1
             );
 
-            fwrite(pFrame->data[0], 1, data_size, stdout);
             if (total_data_size + data_size > allocated_buffer_size) {
                 allocated_buffer_size = allocated_buffer_size * 1.25;
                 samples = realloc(samples, allocated_buffer_size);
@@ -315,7 +336,6 @@ int main(int argc, char *argv[]) {
         av_free_packet(&packet);
     }
 
-    return 0;
     /** DEBUG **/
     av_dump_format(pFormatContext, 0, pFilePath, 0);
     fprintf(stdout, "sample_size: %i\n", (int) bytes_per_sample);

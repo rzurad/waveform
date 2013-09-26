@@ -51,6 +51,7 @@ void log_message(char *msg) {
 }
 
 int main(int argc, char *argv[]) {
+    fprintf(stdout, "fuck off");
     long image_width = 256;
     long image_height = 64;
     int quality = 100;
@@ -351,6 +352,8 @@ int main(int argc, char *argv[]) {
     int mstart = 0;
     int mstart_delta = frames_per_pixel * channel_count;
 
+    int FUCKIN_LOOP_COUNTS_AND_SHIT = 0;
+
     // for each column of pixels
     for (x = 0; x < image_width; ++x, start += frames_per_pixel, mstart += mstart_delta) {
         // get the min and max of this range
@@ -367,6 +370,8 @@ int main(int argc, char *argv[]) {
 
         // for each frame from start to end in this pixel column
         int i;
+        float average = 0;
+        float average_multiplier = 1.0 / frames_times_channels;
 
         for (i = 0; i < frames_times_channels; i += channel_count) {
             // average the channels
@@ -374,17 +379,23 @@ int main(int argc, char *argv[]) {
             int c;
 
             for (c = 0; c < channel_count; ++c) {
+                if (FUCKIN_LOOP_COUNTS_AND_SHIT < 44100) {
+                    fprintf(stdout, "sample %i: %i\n", i + c, frames[i + c]);
+                    FUCKIN_LOOP_COUNTS_AND_SHIT++;
+                }
                 value += frames[i + c] * channel_count_mult;
             }
             //value = frames[i]; //left channel
             //value = frames[i + 1]; //right channel
+
+            average += value * average_multiplier;
 
             // keep track of max/min
             if (value < min) min = value;
             if (value > max) max = value;
         }
 
-        fprintf(stdout, "Pixel Column %x: min %i, max %i\n", x, min, max);
+        fprintf(stdout, "Pixel Column %i: min %i, max %i, average %f\n", x, min, max, average);
         // translate into y pixel coord.
         int y_min = (min - sample_min) * image_bound_y / sample_range;
         int y_max = (max - sample_min) * image_bound_y / sample_range;
