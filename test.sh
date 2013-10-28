@@ -11,7 +11,6 @@ do
 
     echo "converting $f..."
     #./waveform "$f" "$f.png" --verbose
-    #ffmpeg -i "$f"
-    ./waveform2 "$f"
+    ./waveform2 -i "$f" -o "$f.new.png" -v
     echo "================================================================"
 done

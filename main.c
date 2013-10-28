@@ -380,7 +380,7 @@ int main(int argc, char *argv[]) {
 
             for (c = 0; c < channel_count; ++c) {
                 if (FUCKIN_LOOP_COUNTS_AND_SHIT < 44100) {
-                    fprintf(stdout, "sample %i: %i\n", i + c, frames[i + c]);
+                    //fprintf(stdout, "sample %i: %i\n", i + c, frames[i + c]);
                     FUCKIN_LOOP_COUNTS_AND_SHIT++;
                 }
                 value += frames[i + c] * channel_count_mult;
@@ -395,7 +395,7 @@ int main(int argc, char *argv[]) {
             if (value > max) max = value;
         }
 
-        fprintf(stdout, "Pixel Column %i: min %i, max %i, average %f\n", x, min, max, average);
+        //fprintf(stdout, "Pixel Column %i: min %i, max %i, average %f\n", x, min, max, average);
         // translate into y pixel coord.
         int y_min = (min - sample_min) * image_bound_y / sample_range;
         int y_max = (max - sample_min) * image_bound_y / sample_range;
