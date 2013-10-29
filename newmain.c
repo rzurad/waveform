@@ -94,20 +94,6 @@ uint16_t extract_sample_16bit(int index, uint8_t *samples, int channel_count) {
     return raw;
 }
 
-int count = 0;
-void print_frame(const AVFrame *frame) {
-    const int n = frame->nb_samples * av_get_channel_layout_nb_channels(av_frame_get_channel_layout(frame));
-    const int16_t *p = (int16_t *)frame->data[0];
-    const int16_t *p_end = p + n;
-
-    while (p < p_end && count < 88200) {
-        fprintf(stdout, "%i: %i\n", count, (int) *p);
-        p++;
-        count++;
-    }
-    fflush(stdout);
-}
-
 void draw_png(WaveformPNG *png,
               uint8_t *samples,
               int data_size, //the length of samples (an array of *8bit unsigned ints*!)
