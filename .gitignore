@@ -1,6 +1,5 @@
 waveform
-waveform2
-readaudio
+old_waveform
 *.core
 *.png
 *.mp3
