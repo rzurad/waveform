@@ -105,9 +105,9 @@ void draw_png(WaveformPNG *png,
     int image_bound_y = png->height - 1;
     int c, i, x, y; //loop counters
 
-    png_byte color_bg[4] = {0, 0, 0, 128};
-    png_byte color_center[4] = {0, 0, 0, 255};
-    png_byte color_outer[4] = {0, 0, 0, 255};
+    png_byte color_bg[4] = {0, 0, 0, 255};
+    png_byte color_center[4] = {255, 255, 255, 255};
+    png_byte color_outer[4] = {255, 255, 255, 255};
     png_bytep color_at_pixel = (png_bytep) malloc(sizeof(png_byte) * png->height * 4);
 
     //compute the foreground color at each y pixel

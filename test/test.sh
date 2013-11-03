@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+if [ ! -f ../waveform ]
+then
+    echo "Run this from within the test directory after making the waveform file"
+    exit
+fi
+
 # delete previous run's output
 rm data/*.png
 

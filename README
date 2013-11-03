@@ -19,5 +19,10 @@ TODO:
     Make Makefile useful to ops
     Full check against all WD audio test files
     Pass in color information
-    Refactor PNG logic into a different file. Might make for easier drawing changes later on
+    More intuitive command arguments.
+    Add options for and experiment with different drawing modes:
+        - [x] max, solid color
+        - [x] max, two color linear gradient
+        - [ ] average over max, solid color for each
+        - [ ] average over max, two color linear gradient for each
 

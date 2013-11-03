@@ -14,7 +14,7 @@ html, body {
     width: 180px;
     margin: 5px;
     float: left;
-    background-color: antiquewhite;
+    background-color: black;
     background-size: 180px 45px;
     background-repeat: no-repeat;
     background-position: center center;
@@ -42,7 +42,7 @@ html, body {
 (function () {
     "use strict";
 
-    $('.container').delegate('.image:not(.failed)','click', function (e) {
+    $('.container').delegate('.image:not(.failed)', 'click', function (e) {
         window.location = './' + $(e.currentTarget).data('url');
     });
 
@@ -55,7 +55,7 @@ html, body {
             if (/FAILED$/.test(image)) {
                 markup.push(
                     '<div class="image failed">',
-                        '<div class="filename">', image.replace(/.png.FAILED$/, '') , '</div>',
+                        '<div class="filename">', image.replace(/.png.FAILED$/, ''), '</div>',
                     '</div>'
                 );
             } else {
@@ -63,7 +63,7 @@ html, body {
                     '<div class="image" ',
                          'style="background-image: url(', url, ');" ',
                          'data-url="', url, '">',
-                        '<div class="filename">', image, '</div>',
+                        '<div class="filename">', image.replace(/.png$/, ''), '</div>',
                     '</div>'
                 );
             }
