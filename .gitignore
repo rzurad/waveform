@@ -3,3 +3,4 @@ waveform
 *.swp
 *.swo
 test/data
+test/images.js
