@@ -1,8 +1,5 @@
 waveform
-old_waveform
 *.core
-*.png
-*.mp3
 *.swp
 *.swo
-test/
+test/data

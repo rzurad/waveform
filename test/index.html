@@ -1,0 +1,78 @@
+<!doctype>
+<html lang="en">
+    <head>
+        <title>Waveform Generation Test Viewer</title>
+        <style type="text/css">
+html, body {
+    margin: 0px;
+    padding: 0px;
+}
+
+.image {
+    cursor: pointer;
+    height: 180px;
+    width: 180px;
+    margin: 5px;
+    float: left;
+    background-color: antiquewhite;
+    background-size: 180px 45px;
+    background-repeat: no-repeat;
+    background-position: center center;
+}
+
+.failed {
+    cursor: default;
+    background-color: red;
+}
+
+.filename {
+    font-family: Tahoma;
+    font-size: 10px;
+    color: #fff;
+    text-align: center;
+}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+
+        </div>
+        <script type="text/javascript" src="//code.jquery.com/jquery-2.0.3.min.js"></script>
+        <script type="text/javascript">
+(function () {
+    "use strict";
+
+    $('.container').delegate('.image:not(.failed)','click', function (e) {
+        window.location = './' + $(e.currentTarget).data('url');
+    });
+
+    window.injectWaveforms = function (images) {
+        var markup = [];
+
+        images.forEach(function (image) {
+            var url = encodeURIComponent(image);
+
+            if (/FAILED$/.test(image)) {
+                markup.push(
+                    '<div class="image failed">',
+                        '<div class="filename">', image.replace(/.png.FAILED$/, '') , '</div>',
+                    '</div>'
+                );
+            } else {
+                markup.push(
+                    '<div class="image" ',
+                         'style="background-image: url(', url, ');" ',
+                         'data-url="', url, '">',
+                        '<div class="filename">', image, '</div>',
+                    '</div>'
+                );
+            }
+        });
+
+        $('.container').append(markup.join(''));
+    };
+}());
+        </script>
+        <script type="text/javascript" src="images.js"></script>
+    </body>
+</html>
