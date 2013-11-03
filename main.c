@@ -172,14 +172,18 @@ void draw_png(WaveformPNG *png,
         int y_max = (max - sample_min) * image_bound_y / sample_range;
 
         y = 0;
+
+        // draw the top background
         for (; y < y_min; ++y) {
             memcpy(png->pRows[y] + x * 4, color_bg, 4);
         }
 
-        for (; y < y_max; ++y) {
+        // draw the waveform from the top to bottom
+        for (; y <= y_max; ++y) {
             memcpy(png->pRows[y] + x * 4, color_at_pixel + 4 * y, 4);
         }
 
+        // draw the bottom background
         for (; y < png->height; ++y) {
             memcpy(png->pRows[y] + x * 4, color_bg, 4);
         }
