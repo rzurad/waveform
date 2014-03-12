@@ -1,9 +1,9 @@
 # I don't know how to use Make, so this is probably horrible
 waveform:
-	gcc -I/usr/local/include/ffmpeg-devel -L/usr/local/lib/ffmpeg-devel -I/usr/local/include -L/usr/local/lib -o waveform main.c -Wall -g -O3 -lavcodec-devel -lavutil-devel -lavformat-devel -lpng
+	gcc47 -I/usr/local/include/ffmpeg -L/usr/local/lib/ffmpeg -I/usr/local/include -L/usr/local/lib -o waveform main.c -Wall -g -O3 -lavcodec -lavutil -lavformat -lpng -lm
 
 debug:
-	gcc -I/usr/local/include/ffmpeg-devel -L/usr/local/lib/ffmpeg-devel -I/usr/local/include -L/usr/local/lib -o waveform main.c -Wall -g -lavcodec-devel -lavutil-devel -lavformat-devel -lpng
+	gcc47 -I/usr/local/include/ffmpeg -L/usr/local/lib/ffmpeg -I/usr/local/include -L/usr/local/lib -o waveform main.c -Wall -g -lavcodec -lavutil -lavformat -lpng -lm
 
 clean:
 	rm -f waveform
