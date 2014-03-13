@@ -16,6 +16,9 @@ Dependencies:
     zlib
 
 TODO:
+    ffmpeg update seems to now consider many test files to be planar, which
+        it didn't before (3 failures before upgrade, 16 after).
+        Add logic to handle both planar audio files and 32 bit depths
     Make Makefile useful to ops
     Full check against all WD audio test files
     Pass in color information
