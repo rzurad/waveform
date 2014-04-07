@@ -19,7 +19,7 @@ FILES=data/*
 for f in $FILES
 do
     echo "converting $f..."
-    ../waveform -i "$f" -o "$f.png" -h 400 -w 1600
+    ../waveform -i "$f" -o "$f.png" -h 400 -w 1600 -v
 
     if [ $? -eq 0 ];
     then
