@@ -19,7 +19,14 @@ typedef struct WaveformPNG {
     png_bytep *pRows; // pointer to all the rows of pixels in the image
 } WaveformPNG;
 
-
+// normalized version of the AVSampleFormat enum that doesn't care about planar vs interleaved
+enum SampleFormat {
+    SAMPLE_FORMAT_INT8,
+    SAMPLE_FORMAT_INT16,
+    SAMPLE_FORMAT_INT32,
+    SAMPLE_FORMAT_FLOAT,
+    SAMPLE_FORMAT_DOUBLE
+};
 
 // struct to store the raw important data of an audio file pulled from ffmpeg
 typedef struct AudioData {
@@ -56,15 +63,9 @@ typedef struct AudioData {
     size_t bps;
 
     /*
-     * Tells us the format of the audio file as identified by ffmpeg:
-     * https://www.ffmpeg.org/doxygen/2.1/samplefmt_8h.html#af9a51ca15301871723577c730b5865c5
-     *
-     * TODO: AVSampleFormat contains different values for planar vs interleaved, but when
-     * we actually care about the `format` property, we have already normalized to interleaved,
-     * meaning the planar options of AVSampleFormat are redundant and just add cruft to branching
-     * logic. See about refactoring to a planar/interleaved agnostic enum to identify format
+     * Tells us the number format of the audio file
      */
-    enum AVSampleFormat format;
+    enum SampleFormat format;
 
     // how many channels does the audio file have? 1 (mono)? 2 (stereo)
     int channels;
@@ -139,9 +140,10 @@ void close_png(WaveformPNG *pWaveformPNG) {
 // take the given WaveformPNG struct and draw an audio waveform based on the data from
 // the given AudioData struct
 void draw_png(WaveformPNG *png, AudioData *data) {
-    int center_y = png->height / 2;
-    int image_bound_y = png->height - 1;
+    int center_y = png->height / 2; // what pixel is the center of the image?
+    int image_bound_y = png->height - 1; // count of pixels in height starting from 0
 
+    // hard code some colors
     png_byte color_bg[4] = {0, 0, 0, 255};
     png_byte color_center[4] = {255, 255, 255, 255};
     png_byte color_outer[4] = {255, 255, 255, 255};
@@ -158,22 +160,30 @@ void draw_png(WaveformPNG *png, AudioData *data) {
         }
     }
 
-    // figure out the min and max ranges of samples, based on bit depth.
-    // these come out to be the min/max values of various signed number sizes:
-    // -128/127, -32,768/32,767, etc
-    int sample_min = pow(2, data->bps * 8) / -2;
-    int sample_max = pow(2, data->bps * 8) / 2 - 1;
+    // figure out the min and max ranges of samples, based on bit depth and format
+    int sample_min;
+    int sample_max;
 
     // unless we're dealing with floats, then we're dealing with ranges from 1.0 to -1.0
-    if (data->format == AV_SAMPLE_FMT_FLT || data->format == AV_SAMPLE_FMT_FLTP) {
+    if (data->format == SAMPLE_FORMAT_FLOAT || data->format == SAMPLE_FORMAT_DOUBLE) {
+        // floats and doubles have a range of -1.0 to 1.0
+        // NOTE: It is entirely possible for a sample to go beyond this range. Any value outside
+        // is considered beyond full volume. Be aware of this when doing math with sample values.
         sample_min = -1;
         sample_max = 1;
+    } else {
+        // we're dealing with integers, so the range of samples is going to be the min/max values
+        // of signed integers of either 8, 16, or 32 bit:
+        //  -128/127, -32,768/32,767, or -2,147,483,648/2,147,483,647
+        sample_min = pow(2, data->bps * 8) / -2;
+        sample_max = pow(2, data->bps * 8) / 2 - 1;
     }
 
-    int sample_range = sample_max - sample_min;
+    int sample_range = sample_max - sample_min; // total range of values a sample can have
+    int sample_count = data->size / data->bps; // how many samples are there total?
+    int samples_per_pixel = sample_count / png->width; // how many samples fit in a column of pixels?
 
-    int sample_count = data->size / data->bps;
-    int samples_per_pixel = sample_count / png->width;
+    // multipliers used to produce averages while iterating through samples.
     double average_multiplier = 1.0 / samples_per_pixel;
     double channel_average_multiplier = 1.0 / data->channels;
 
@@ -195,48 +205,36 @@ void draw_png(WaveformPNG *png, AudioData *data) {
 
             int c;
             for (c = 0; c < data->channels; ++c) {
+                int index = x * samples_per_pixel + i + c;
+
                 switch (data->format) {
-                    case AV_SAMPLE_FMT_U8:
-                    case AV_SAMPLE_FMT_U8P:
-                        value += data->samples[(x * samples_per_pixel) + i + c] * channel_average_multiplier;
+                    case SAMPLE_FORMAT_INT8:
+                        value += data->samples[index] * channel_average_multiplier;
                         break;
-                    case AV_SAMPLE_FMT_S16:
-                    case AV_SAMPLE_FMT_S16P:
-                        value += ((int16_t *) data->samples)[(x * samples_per_pixel) + i + c] * channel_average_multiplier;
+                    case SAMPLE_FORMAT_INT16:
+                        value += ((int16_t *) data->samples)[index] * channel_average_multiplier;
                         break;
-                    case AV_SAMPLE_FMT_S32:
-                    case AV_SAMPLE_FMT_S32P:
-                        value += ((int32_t *) data->samples)[(x * samples_per_pixel) + i + c] * channel_average_multiplier;
+                    case SAMPLE_FORMAT_INT32:
+                        value += ((int32_t *) data->samples)[index] * channel_average_multiplier;
                         break;
-                    case AV_SAMPLE_FMT_FLT:
-                    case AV_SAMPLE_FMT_FLTP:
-                        value += ((float *) data->samples)[(x * samples_per_pixel) + i + c] * channel_average_multiplier;
-
-                        if (value < -1.0) {
-                            value = -1.0;
-                        }
-
-                        if (value > 1.0) {
-                            value = 1.0;
-                        }
-
+                    case SAMPLE_FORMAT_FLOAT:
+                        value += ((float *) data->samples)[index] * channel_average_multiplier;
                         break;
-                    case AV_SAMPLE_FMT_DBL:
-                    case AV_SAMPLE_FMT_DBLP:
-                        value += ((double *) data->samples)[(x * samples_per_pixel) + i + c] * channel_average_multiplier;
-
-                        if (value < -1.0) {
-                            value = -1.0;
-                        }
-
-                        if (value > 1.0) {
-                            value = 1.0;
-                        }
-
+                    case SAMPLE_FORMAT_DOUBLE:
+                        value += ((double *) data->samples)[index] * channel_average_multiplier;
                         break;
-                    default:
-                        fprintf(stderr, "Encountered float/double format and freaked out.\n");
-                        exit(1);
+                }
+            }
+
+            // if the value is over or under the floating point range (which it perfectly fine
+            // according to ffmpeg), we need to truncate it to still be within our range of
+            // -1.0 to 1.0, otherwise some of our latter math will have a bad case of
+            // the segfault sads.
+            if (data->format == SAMPLE_FORMAT_DOUBLE || data->format == SAMPLE_FORMAT_FLOAT) {
+                if (value < -1.0) {
+                    value = -1.0;
+                } else if (value > 1.0) {
+                    value = 1.0;
                 }
             }
 
@@ -257,6 +255,7 @@ void draw_png(WaveformPNG *png, AudioData *data) {
         int y_max = image_bound_y - ((min - sample_min) * image_bound_y / sample_range);
         int y_min = image_bound_y - ((max - sample_min) * image_bound_y / sample_range);
 
+        // start drawing from the bottom
         y = image_bound_y;
 
         // draw the bottom background
@@ -269,7 +268,7 @@ void draw_png(WaveformPNG *png, AudioData *data) {
             memcpy(png->pRows[y] + x * 4, color_at_pixel + 4 * y, 4);
         }
 
-        // draw the bottom background
+        // draw the top background
         for (; y >= 0; --y) {
             memcpy(png->pRows[y] + x * 4, color_bg, 4);
         }
@@ -320,6 +319,35 @@ AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecod
     data.bps = av_get_bytes_per_sample(pDecoderContext->sample_fmt); // *byte* depth
     data.channels = pDecoderContext->channels;
 
+    // normalize the sample format to an enum that's less verbose than AVSampleFormat.
+    // We won't care about signed/unsigned or planar/interleaved
+    switch (pDecoderContext->sample_fmt) {
+        case AV_SAMPLE_FMT_U8:
+        case AV_SAMPLE_FMT_U8P:
+            data.format = SAMPLE_FORMAT_INT8;
+            break;
+        case AV_SAMPLE_FMT_S16:
+        case AV_SAMPLE_FMT_S16P:
+            data.format = SAMPLE_FORMAT_INT16;
+            break;
+        case AV_SAMPLE_FMT_S32:
+        case AV_SAMPLE_FMT_S32P:
+            data.format = SAMPLE_FORMAT_INT32;
+            break;
+        case AV_SAMPLE_FMT_FLT:
+        case AV_SAMPLE_FMT_FLTP:
+            data.format = SAMPLE_FORMAT_FLOAT;
+            break;
+        case AV_SAMPLE_FMT_DBL:
+        case AV_SAMPLE_FMT_DBLP:
+            data.format = SAMPLE_FORMAT_DOUBLE;
+            break;
+        default:
+            fprintf(stderr, "Bad format: %s\n", av_get_sample_fmt_name(pDecoderContext->sample_fmt));
+            exit(1);
+            break;
+    }
+
     // guess how much memory we'll need for samples
     int allocated_buffer_size = bit_rate * (int) ceil(duration) * data.bps * data.channels;
     data.samples = malloc(sizeof(uint8_t) * allocated_buffer_size);
@@ -331,10 +359,10 @@ AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecod
         exit(1);
     }
 
-    // Loop through the entire audio file by reading a compressed frame of the stream
-    // into the packet struct and copy it into a buffer.
+    // Loop through the entire audio file by reading a compressed packet of the stream
+    // into the uncomrpressed frame struct and copy it into a buffer.
     // It's important to remember that in this context, even though the actual format might
-    // be 16 bit or 24 bit with x number of channels, while we're copying things,
+    // be 16 bit or 24 bit or float with x number of channels, while we're copying things,
     // we are only dealing with an array of 8 bit integers. 
     //
     // It's up to anything using the AudioData struct to know how to properly read the data
@@ -377,7 +405,7 @@ AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecod
                 // iterate through extended_data and copy each sample into `samples` while
                 // interleaving each channel (copy sample one from left, then right. copy sample
                 // two from left, then right, etc.)
-                for (; i < data_size / data->channels; i += data.bps) {
+                for (; i < data_size / data.channels; i += data.bps) {
                     // we only care about the first two channels.
 
                     // TODO: This means data->channels lies. The source file may have had 5 channels,
