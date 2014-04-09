@@ -16,14 +16,16 @@ echo "injectWaveforms([" > images.js
 # into the waveform, generating a 1600x400 png file wth the same name,
 # including the original audio file extension.
 FILES=data/*
+file=
 for f in $FILES
 do
     echo "converting $f..."
-    ../waveform -i "$f" -o "$f.png" -h 400 -w 1600 -v
+    ../waveform -i "$f" -o "$f.png" -h 400 -w 1600
 
     if [ $? -eq 0 ];
     then
         echo "'$f.png'," >> images.js
+        file=$f
     else
         # tell the images.js file that this file failed by
         # tweaking the filename
@@ -33,16 +35,18 @@ done
 
 # generate different sizes of thumbnails to show how the waveform changes
 # with the quantization resolution
-echo "Generating WD thumbnail sizes"
-file="data/midnight_city.mp3"
-../waveform -i "$file" -o "$file.TINY.png" -h 20 -w 80
-../waveform -i "$file" -o "$file.SMALL.png" -h 45 -w 180
-../waveform -i "$file" -o "$file.LARGE.png" -h 160 -w 640
-../waveform -i "$file" -o "$file.MAX.png" -h 400 -w 1600
-echo "'$file.TINY.png'," >> images.js
-echo "'$file.SMALL.png'," >> images.js
-echo "'$file.LARGE.png'," >> images.js
-echo "'$file.MAX.png'," >> images.js
+if [ ! -z $file ]
+then
+    echo "Generating WD thumbnail sizes"
+    ../waveform -i "$file" -o "$file.TINY.png" -h 20 -w 80
+    ../waveform -i "$file" -o "$file.SMALL.png" -h 45 -w 180
+    ../waveform -i "$file" -o "$file.LARGE.png" -h 160 -w 640
+    ../waveform -i "$file" -o "$file.MAX.png" -h 400 -w 1600
+    echo "'$file.TINY.png'," >> images.js
+    echo "'$file.SMALL.png'," >> images.js
+    echo "'$file.LARGE.png'," >> images.js
+    echo "'$file.MAX.png'," >> images.js
+fi
 
 # end the padding for the test page array
 # leaving a trailing comma because why the hell are you viewing it 

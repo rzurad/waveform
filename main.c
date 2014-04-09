@@ -21,7 +21,7 @@ typedef struct WaveformPNG {
 
 // normalized version of the AVSampleFormat enum that doesn't care about planar vs interleaved
 enum SampleFormat {
-    SAMPLE_FORMAT_INT8,
+    SAMPLE_FORMAT_UINT8,
     SAMPLE_FORMAT_INT16,
     SAMPLE_FORMAT_INT32,
     SAMPLE_FORMAT_FLOAT,
@@ -46,13 +46,6 @@ typedef struct AudioData {
 
     /*
      * The size of the `samples` buffer.
-     *
-     * NOTE: This is NOT the size in 8 bit ints. The buffer itself is defined as pointers to uint8_t,
-     * but the contents can actually be any number type specified by AVSampleFormat. The actual
-     * `sizeof` each sample is determined by the `bps` property. Use `size` together with
-     * `bps` and `format` to determine how to pull samples out of the `samples` buffer---`bps` telling
-     * use the size of the pointer to use (1, 2, or 4 bytes) and `format` telling you the type
-     * of number to use (int, float, double)
      */
     int size;
 
@@ -60,7 +53,7 @@ typedef struct AudioData {
      * Number of bytes per sample. Use together with `size` and `format` to pull data from
      * the `samples` buffer
      */
-    size_t bps;
+    int sample_size;
 
     /*
      * Tells us the number format of the audio file
@@ -154,9 +147,9 @@ void draw_png(WaveformPNG *png, AudioData *data) {
     for (y = 0; y < png->height; y++) {
         int i;
         for (i = 0; i < 4; i++) {
-            float fAmount = abs(y - center_y) / (float) center_y;
+            float amount = abs(y - center_y) / (float) center_y;
 
-            color_at_pixel[4 * y + i] = (1 - fAmount) * color_center[i] + fAmount * color_outer[i];
+            color_at_pixel[4 * y + i] = (1 - amount) * color_center[i] + amount * color_outer[i];
         }
     }
 
@@ -164,23 +157,33 @@ void draw_png(WaveformPNG *png, AudioData *data) {
     int sample_min;
     int sample_max;
 
-    // unless we're dealing with floats, then we're dealing with ranges from 1.0 to -1.0
-    if (data->format == SAMPLE_FORMAT_FLOAT || data->format == SAMPLE_FORMAT_DOUBLE) {
-        // floats and doubles have a range of -1.0 to 1.0
-        // NOTE: It is entirely possible for a sample to go beyond this range. Any value outside
-        // is considered beyond full volume. Be aware of this when doing math with sample values.
-        sample_min = -1;
-        sample_max = 1;
-    } else {
-        // we're dealing with integers, so the range of samples is going to be the min/max values
-        // of signed integers of either 8, 16, or 32 bit:
-        //  -128/127, -32,768/32,767, or -2,147,483,648/2,147,483,647
-        sample_min = pow(2, data->bps * 8) / -2;
-        sample_max = pow(2, data->bps * 8) / 2 - 1;
+    // figure out the range of sample values we're dealing with
+    switch (data->format) {
+        case SAMPLE_FORMAT_FLOAT:
+        case SAMPLE_FORMAT_DOUBLE:
+            // floats and doubles have a range of -1.0 to 1.0
+            // NOTE: It is entirely possible for a sample to go beyond this range. Any value outside
+            // is considered beyond full volume. Be aware of this when doing math with sample values.
+            sample_min = -1;
+            sample_max = 1;
+
+            break;
+        case SAMPLE_FORMAT_UINT8:
+            sample_min = 0;
+            sample_max = 255;
+
+            break;
+        default:
+            // we're dealing with integers, so the range of samples is going to be the min/max values
+            // of signed integers of either 16 or 32 bit (24 bit formats get converted to 32 bit at
+            // the AVFrame level):
+            //  -32,768/32,767, or -2,147,483,648/2,147,483,647
+            sample_min = pow(2, data->sample_size * 8) / -2;
+            sample_max = pow(2, data->sample_size * 8) / 2 - 1;
     }
 
-    int sample_range = sample_max - sample_min; // total range of values a sample can have
-    int sample_count = data->size / data->bps; // how many samples are there total?
+    uint32_t sample_range = sample_max - sample_min; // total range of values a sample can have
+    int sample_count = data->size / data->sample_size; // how many samples are there total?
     int samples_per_pixel = sample_count / png->width; // how many samples fit in a column of pixels?
 
     // multipliers used to produce averages while iterating through samples.
@@ -208,7 +211,7 @@ void draw_png(WaveformPNG *png, AudioData *data) {
                 int index = x * samples_per_pixel + i + c;
 
                 switch (data->format) {
-                    case SAMPLE_FORMAT_INT8:
+                    case SAMPLE_FORMAT_UINT8:
                         value += data->samples[index] * channel_average_multiplier;
                         break;
                     case SAMPLE_FORMAT_INT16:
@@ -293,70 +296,66 @@ void help() {
 
 // Takes a given AVFormatContext and AVCodecContext from ffmpeg, extracts the raw sample
 // information and dumps it into the returned AudioData struct
-AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
+AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
     // Packets will contain chucks of compressed audio data read from the audio file.
     AVPacket packet;
 
-    // Frames will contain the raw uncompressed audio data from a given Packet
+    // Frames will contain the raw uncompressed audio data read from a packet
     AVFrame *pFrame = NULL;
 
     // how long in seconds is the audio file?
     double duration = pFormatContext->duration / (double) AV_TIME_BASE;
 
-    // how many bits per second is the audio file?
-    // TODO: bit_rate is only used to guess the buffer size, and it's sometimes a bad guess.
-    // Perhaps find a more accurate way that doesn't rely on bit_rate?
-    int bit_rate = pFormatContext->bit_rate;
+    // is the audio interleaved or planar?
     int is_planar = av_sample_fmt_is_planar(pDecoderContext->sample_fmt);
 
     // running total of how much data has been converted to raw and copied into the AudioData
     // `samples` buffer. This will eventually be `data->size`
-    int total_data_size = 0;
+    int total_size = 0;
 
     // Make the AudioData object we'll be returning
-    AudioData data;
-    data.format = pDecoderContext->sample_fmt;
-    data.bps = av_get_bytes_per_sample(pDecoderContext->sample_fmt); // *byte* depth
-    data.channels = pDecoderContext->channels;
+    AudioData *data = malloc(sizeof(AudioData));
+    data->format = pDecoderContext->sample_fmt;
+    data->sample_size = (int) av_get_bytes_per_sample(pDecoderContext->sample_fmt); // *byte* depth
+    data->channels = pDecoderContext->channels;
 
     // normalize the sample format to an enum that's less verbose than AVSampleFormat.
-    // We won't care about signed/unsigned or planar/interleaved
+    // We won't care about planar/interleaved
     switch (pDecoderContext->sample_fmt) {
         case AV_SAMPLE_FMT_U8:
         case AV_SAMPLE_FMT_U8P:
-            data.format = SAMPLE_FORMAT_INT8;
+            data->format = SAMPLE_FORMAT_UINT8;
             break;
         case AV_SAMPLE_FMT_S16:
         case AV_SAMPLE_FMT_S16P:
-            data.format = SAMPLE_FORMAT_INT16;
+            data->format = SAMPLE_FORMAT_INT16;
             break;
         case AV_SAMPLE_FMT_S32:
         case AV_SAMPLE_FMT_S32P:
-            data.format = SAMPLE_FORMAT_INT32;
+            data->format = SAMPLE_FORMAT_INT32;
             break;
         case AV_SAMPLE_FMT_FLT:
         case AV_SAMPLE_FMT_FLTP:
-            data.format = SAMPLE_FORMAT_FLOAT;
+            data->format = SAMPLE_FORMAT_FLOAT;
             break;
         case AV_SAMPLE_FMT_DBL:
         case AV_SAMPLE_FMT_DBLP:
-            data.format = SAMPLE_FORMAT_DOUBLE;
+            data->format = SAMPLE_FORMAT_DOUBLE;
             break;
         default:
             fprintf(stderr, "Bad format: %s\n", av_get_sample_fmt_name(pDecoderContext->sample_fmt));
-            exit(1);
-            break;
+            return NULL;
     }
 
-    // guess how much memory we'll need for samples
-    int allocated_buffer_size = bit_rate * (int) ceil(duration) * data.bps * data.channels;
-    data.samples = malloc(sizeof(uint8_t) * allocated_buffer_size);
+    // guess how much memory we'll need for samples.
+    int allocated_buffer_size = (pFormatContext->bit_rate / 8) * duration;
+
+    data->samples = malloc(sizeof(uint8_t) * allocated_buffer_size);
     av_init_packet(&packet);
 
     if (!(pFrame = avcodec_alloc_frame())) {
-        avcodec_close(pDecoderContext);
-        avformat_close_input(&pFormatContext);
-        exit(1);
+        fprintf(stderr, "Could not allocate AVFrame\n");
+        return NULL;
     }
 
     // Loop through the entire audio file by reading a compressed packet of the stream
@@ -375,7 +374,8 @@ AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecod
 
         // Use the decoder to populate the raw frame with data from the compressed packet.
         if (avcodec_decode_audio4(pDecoderContext, pFrame, &frame_finished, &packet) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "Error decoding audio\n");
+            fprintf(stderr, "Could not decode audio packet.\n");
+            continue;
         }
 
         // did we get an entire raw frame from the packet?
@@ -384,16 +384,16 @@ AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecod
             // data_size = pFrame->nb_samples * pFrame->channels * bytes_per_sample
             int data_size = av_samples_get_buffer_size(
                 is_planar ? &pFrame->linesize[0] : NULL,
-                data.channels,
+                data->channels,
                 pFrame->nb_samples,
-                data.format,
+                data->format,
                 1
             );
 
             // if we don't have enough space in our copy buffer, expand it
-            if (total_data_size + data_size > allocated_buffer_size) {
+            if (total_size + data_size > allocated_buffer_size) {
                 allocated_buffer_size = allocated_buffer_size * 1.25;
-                data.samples = realloc(data.samples, allocated_buffer_size);
+                data->samples = realloc(data->samples, allocated_buffer_size);
             }
 
             if (is_planar) {
@@ -405,23 +405,17 @@ AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecod
                 // iterate through extended_data and copy each sample into `samples` while
                 // interleaving each channel (copy sample one from left, then right. copy sample
                 // two from left, then right, etc.)
-                for (; i < data_size / data.channels; i += data.bps) {
-                    // we only care about the first two channels.
-
-                    // TODO: This means data->channels lies. The source file may have had 5 channels,
-                    // but `samples` will only contain the first two. (CAUTION: DRAGONS!)
-                    // FIX THIS so that all the data is there. Let the drawing algorithm decide
-                    // to ignore all but the first two channels
-                    for (c = 0; c < 1; c++) {
-                        memcpy(data.samples + total_data_size, pFrame->extended_data[c] + i, data.bps);
-                        total_data_size += data.bps;
+                for (; i < data_size / data->channels; i += data->sample_size) {
+                    for (c = 0; c < data->channels; c++) {
+                        memcpy(data->samples + total_size, pFrame->extended_data[c] + i, data->sample_size);
+                        total_size += data->sample_size;
                     }
                 }
             } else {
                 // source file is already interleaved. just copy the raw data from the frame into
                 // the `samples` buffer.
-                memcpy(data.samples + total_data_size, pFrame->extended_data[0], data_size);
-                total_data_size += data_size;
+                memcpy(data->samples + total_size, pFrame->extended_data[0], data_size);
+                total_size += data_size;
             }
         }
 
@@ -430,15 +424,27 @@ AudioData get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecod
         av_free_packet(&packet);
     }
 
-    if (total_data_size == 0) {
-        // not a single packet could be read. Quit.
-        fprintf(stderr, "Did not read any audio data.\n");
-        exit(1);
+    if (total_size == 0) {
+        // not a single packet could be read.
+        return NULL;
     }
 
-    data.size = total_data_size;
+    data->size = total_size;
+    fprintf(stdout, "duration:   %f\n", duration);
+    fprintf(stdout, "bit rate:   %i\n", pFormatContext->bit_rate);
+    fprintf(stdout, "allocated:  %i\n", allocated_buffer_size);
+    fprintf(stdout, "total size: %i\n", total_size);
+    fprintf(stdout, "discrep:    %i\n", allocated_buffer_size - total_size);
 
     return data;
+}
+
+
+
+// close and free ffmpeg structs
+void cleanup(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
+    avformat_close_input(&pFormatContext);
+    avcodec_close(pDecoderContext);
 }
 
 
@@ -491,15 +497,15 @@ int main(int argc, char *argv[]) {
 
     // open the audio file
     if (avformat_open_input(&pFormatContext, pFilePath, NULL, NULL) < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot open input file\n");
-        exit(1);
+        fprintf(stderr, "Cannot open input file.\n");
+        goto ERROR;
     }
 
     // Tell ffmpeg to read the file header and scan some of the data to determine
     // everything it can about the format of the file
     if (avformat_find_stream_info(pFormatContext, NULL) < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot find stream information\n");
-        exit(1);
+        fprintf(stderr, "Cannot find stream information.\n");
+        goto ERROR;
     }
 
     // find the audio stream we probably care about.
@@ -507,29 +513,29 @@ int main(int argc, char *argv[]) {
     stream_index = av_find_best_stream(pFormatContext, AVMEDIA_TYPE_AUDIO, -1, -1, &pDecoder, 0);
 
     if (stream_index < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot find an audio stream in file\n");
-        exit(1);
+        fprintf(stderr, "Unable to find audio stream in file.\n");
+        goto ERROR;
     }
 
     // now that we have a stream, get the codec for the given stream
     pDecoderContext = pFormatContext->streams[stream_index]->codec;
 
-    //TODO:  is this needed?
-    av_opt_set_int(pDecoderContext, "refcounted_frames", 1, 0);
-
     // open the decoder for this audio stream
     if (avcodec_open2(pDecoderContext, pDecoder, NULL) < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot open audio decoder\n");
-        exit(1);
+        fprintf(stderr, "Cannot open audio decoder.\n");
+        goto ERROR;
     }
 
     // we have a stream that looks valid, so get all the raw samples from it
-    AudioData data = get_audio_data(pFormatContext, pDecoderContext);
+    AudioData *data = get_audio_data(pFormatContext, pDecoderContext);
+   if (data == NULL) {
+        goto ERROR;
+    }
 
     // initialize the png we'll be drawing
     WaveformPNG png = init_png(pOutFile, width, height);
 
-    draw_png(&png, &data);
+    draw_png(&png, data);
     write_png(&png);
     close_png(&png);
 
@@ -537,9 +543,10 @@ int main(int argc, char *argv[]) {
         av_dump_format(pFormatContext, 0, pFilePath, 0);
     }
 
-    // clean-up before exit
-    avformat_close_input(&pFormatContext);
-    avcodec_close(pDecoderContext);
-
+    cleanup(pFormatContext, pDecoderContext);
     return 0;
+
+ERROR:
+    cleanup(pFormatContext, pDecoderContext);
+    return 1;
 }

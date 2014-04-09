@@ -1,7 +1,5 @@
 Command Line Usage:
 
-    waveform [options] audiofile pngfile
-
     Available options with their defaults:
     -i [REQUIRED]               Input file to parse
     -o [optional]               Output file for PNG (stdout if omitted)
@@ -11,21 +9,11 @@ Command Line Usage:
 
 Dependencies:
 
-    ffmpeg-devel
+    ffmpeg 2.1.1
     libpng
     zlib
 
 TODO:
-    ffmpeg update seems to now consider many test files to be planar, which
-        it didn't before (3 failures before upgrade, 16 after).
-        Add logic to handle both planar audio files and 32 bit depths
-    Make Makefile useful to ops
-    Full check against all WD audio test files
-    Pass in color information
-    More intuitive command arguments.
-    Add options for and experiment with different drawing modes:
-        - [x] max, solid color
-        - [x] max, two color linear gradient
-        - [ ] average over max, solid color for each
-        - [ ] average over max, two color linear gradient for each
-
+    Check 2+ channel files
+    Pass in color information?
+    Add option to draw stereo waveforms
