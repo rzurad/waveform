@@ -19,8 +19,10 @@ FILES=data/*
 file=
 for f in $FILES
 do
-    echo "converting $f..."
-    ../waveform -i "$f" -o "$f.png" -h 400 -w 1600
+    echo "generating waveforms for $f..."
+    #../waveform -i "$f" -o "$f.png" -h 400 -w 1600
+    ../waveform -i "$f" -o "$f.png" -t 400 -w 1600
+    #../waveform -i "$f" -o "$f.png" -h 400 -w 1600 -m
 
     if [ $? -eq 0 ];
     then
@@ -38,10 +40,10 @@ done
 if [ ! -z $file ]
 then
     echo "Generating WD thumbnail sizes"
-    ../waveform -i "$file" -o "$file.TINY.png" -h 20 -w 80
-    ../waveform -i "$file" -o "$file.SMALL.png" -h 45 -w 180
-    ../waveform -i "$file" -o "$file.LARGE.png" -h 160 -w 640
-    ../waveform -i "$file" -o "$file.MAX.png" -h 400 -w 1600
+    ../waveform -i "$file" -o "$file.TINY.png" -t 20 -w 80
+    ../waveform -i "$file" -o "$file.SMALL.png" -t 45 -w 180
+    ../waveform -i "$file" -o "$file.LARGE.png" -t 160 -w 640
+    ../waveform -i "$file" -o "$file.MAX.png" -t 400 -w 1600
     echo "'$file.TINY.png'," >> images.js
     echo "'$file.SMALL.png'," >> images.js
     echo "'$file.LARGE.png'," >> images.js
