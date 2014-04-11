@@ -524,7 +524,7 @@ AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDeco
                 is_planar ? &pFrame->linesize[0] : NULL,
                 data->channels,
                 pFrame->nb_samples,
-                data->format,
+                pDecoderContext->sample_fmt,
                 1
             );
 
