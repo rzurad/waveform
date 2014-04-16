@@ -2,15 +2,37 @@ Command Line Usage:
 
     Available options with their defaults:
     -i [REQUIRED]               Input file to parse
-    -o [optional]               Output file for PNG (stdout if omitted)
+
+    -o                          Output file for PNG (stdout if omitted)
+
     -h 64                       Height of output image. The height of each channel will be constrained
-                                so that all channels can fit within the specified height
+                                so that all channels can fit within the specified height.
+
+                                If used with the -t option, -h defines the maximum height the
+                                generated image can have. If all tracks can have a height of -t
+                                with the final image being below the height defined by -h, the
+                                output image will have a height of -t multiplied by the number of
+                                channels in the input file. If not, the output image will have a
+                                height of -h.
+
     -t 64                       Height of each track in the output image. The final height of the
                                 output png will be this value multiplied by the number of channels
-                                in the audio stream
+                                in the audio stream.
+
+                                If you use the -t option together with the -h option, the
+                                final output will use -t if all tracks can fit within the height
+                                constraint defined by the -h option. If they can not, the track
+                                height will be adjusted to fit within the -h option.
+
     -w 256                      Width of output PNG image
+
     -m                          Produce a single channel waveform. Each channel will be averaged
-                                together to produce the final channel.
+                                together to produce the final channel. The -h and -t options behave
+                                as though the input file is monaural.
+
+Examples:
+
+    TODO
 
 Dependencies:
 
@@ -21,5 +43,6 @@ Dependencies:
     libpng 1.5.18
 
 TODO:
-    Pass in color information?
-    BROKEN: ALL CHANNELS ARE BEING DRAWN THE SAME!!
+    add padding between channels
+    fix help text
+    Pass in color information

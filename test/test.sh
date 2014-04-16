@@ -9,29 +9,46 @@ fi
 # delete previous run's output
 rm data/*.png
 
-# inject the padding and the start of the array for the test page,
-echo "injectWaveforms([" > images.js
-
-# iterate through all files in the data/ folder and pass them
-# into the waveform, generating a 1600x400 png file wth the same name,
-# including the original audio file extension.
+all=$1
 FILES=data/*
 file=
-for f in $FILES
-do
-    echo "generating waveforms for $f..."
-    #../waveform -i "$f" -o "$f.png" -h 400 -w 1600
-    ../waveform -i "$f" -o "$f.png" -t 400 -w 1600
-    #../waveform -i "$f" -o "$f.png" -h 400 -w 1600 -m
+result=
+
+# executes the waveform program and dumps the exit code into `result`
+#   Paremeter 1: the audio file to test
+#   Parameter 2: the image file to output
+#   Parameter 3: string of additional arguments to send to the waveform program
+run () {
+    # eval result=../waveform -i $1 -o $2 $3
+    ../waveform -i "$1" -o "$2" $3
 
     if [ $? -eq 0 ];
     then
-        echo "'$f.png'," >> images.js
-        file=$f
+        # echo the location of the produced png into the images.js file
+        echo "'$2'," >> images.js
+        file=$1
     else
-        # tell the images.js file that this file failed by
-        # tweaking the filename
-        echo "'$f.png.FAILED'," >> images.js
+        # could not generate waveform.
+        # echo the png file name, but append FAILED to it
+        echo "'$2.FAILED'," >> images.js
+    fi
+}
+
+# inject the padding and the start of the array for the test page,
+echo "injectWaveforms([" > images.js
+
+# iterate through all files in the data/ folder
+for f in $FILES
+do
+    echo "generating waveforms for $f..."
+
+    run "$f" "$f.max_height.png" "-h 800 -t 600 -w 1600"
+
+    if [ "$all" == "all" ];
+    then
+        run "$f" "$f.monofied.png" "-h 400 -w 1600 -m"
+        run "$f" "$f.png" "-t 400 -w 1600"
+        run "$f" "$f.fixed.png" "-h 800 -w 1600"
     fi
 done
 
@@ -39,15 +56,12 @@ done
 # with the quantization resolution
 if [ ! -z $file ]
 then
-    echo "Generating WD thumbnail sizes"
-    ../waveform -i "$file" -o "$file.TINY.png" -t 20 -w 80
-    ../waveform -i "$file" -o "$file.SMALL.png" -t 45 -w 180
-    ../waveform -i "$file" -o "$file.LARGE.png" -t 160 -w 640
-    ../waveform -i "$file" -o "$file.MAX.png" -t 400 -w 1600
-    echo "'$file.TINY.png'," >> images.js
-    echo "'$file.SMALL.png'," >> images.js
-    echo "'$file.LARGE.png'," >> images.js
-    echo "'$file.MAX.png'," >> images.js
+    echo "generating WD thumbnail sizes..."
+
+    run "$file" "$file.TINY.png" "-h 40 -w 80"
+    run "$file" "$file.SMALL.png" "-h 90 -w 180"
+    run "$file" "$file.LARGE.png" "-h 320 -w 640"
+    run "$file" "$file.MAX.png" "-h 800 -w 1600"
 fi
 
 # end the padding for the test page array
