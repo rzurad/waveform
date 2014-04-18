@@ -160,10 +160,108 @@ void close_png(WaveformPNG *pWaveformPNG) {
 
 
 
-// free memory allocated by 
+// free memory allocated by an AudioData struct
 void free_audio_data(AudioData *data) {
     free(data->samples);
     free(data);
+}
+
+
+
+double get_sample(AudioData *data, int index) {
+    double value = 0.0;
+
+    switch (data->format) {
+        case SAMPLE_FORMAT_UINT8:
+            value += data->samples[index];
+            break;
+        case SAMPLE_FORMAT_INT16:
+            value += ((int16_t *) data->samples)[index];
+            break;
+        case SAMPLE_FORMAT_INT32:
+            value += ((int32_t *) data->samples)[index];
+            break;
+        case SAMPLE_FORMAT_FLOAT:
+            value += ((float *) data->samples)[index];
+            break;
+        case SAMPLE_FORMAT_DOUBLE:
+            value += ((double *) data->samples)[index];
+            break;
+    }
+
+    // if the value is over or under the floating point range (which it perfectly fine
+    // according to ffmpeg), we need to truncate it to still be within our range of
+    // -1.0 to 1.0, otherwise some of our latter math will have a bad case of
+    // the segfault sads.
+    if (data->format == SAMPLE_FORMAT_DOUBLE || data->format == SAMPLE_FORMAT_FLOAT) {
+        if (value < -1.0) {
+            value = -1.0;
+        } else if (value > 1.0) {
+            value = 1.0;
+        }
+    }
+
+    return value;
+}
+
+
+
+void get_format_range(enum SampleFormat format, int *min, int *max) {
+    int size;
+
+    // figure out the range of sample values we're dealing with
+    switch (format) {
+        case SAMPLE_FORMAT_FLOAT:
+        case SAMPLE_FORMAT_DOUBLE:
+            // floats and doubles have a range of -1.0 to 1.0
+            // NOTE: It is entirely possible for a sample to go beyond this range. Any value outside
+            // is considered beyond full volume. Be aware of this when doing math with sample values.
+            *min = -1;
+            *max = 1;
+
+            break;
+        case SAMPLE_FORMAT_UINT8:
+            *min = 0;
+            *max = 255;
+
+            break;
+        default:
+
+            // we're dealing with integers, so the range of samples is going to be the min/max values
+            // of signed integers of either 16 or 32 bit (24 bit formats get converted to 32 bit at
+            // the AVFrame level):
+            //  -32,768/32,767, or -2,147,483,648/2,147,483,647
+            size = format == SAMPLE_FORMAT_INT16 ? 2 : 4;
+            *min = pow(2, size * 8) / -2;
+            *max = pow(2, size * 8) / 2 - 1;
+    }
+}
+
+
+
+void draw_column_segment(WaveformPNG *png,
+                         int column_index,
+                         int start_y,
+                         int end_y,
+                         int waveform_top,
+                         int waveform_bottom
+) {
+    int y = end_y;
+
+    // draw the bottom background
+    for (; y > waveform_bottom; --y) {
+        memcpy(png->pRows[y] + column_index * 4, color_bg, 4);
+    }
+
+    // draw the waveform from the bottom to top
+    for (; y >= waveform_top; --y) {
+        memcpy(png->pRows[y] + column_index * 4, color_waveform, 4);
+    }
+
+    // draw the top background
+    for (; y >= start_y; --y) {
+        memcpy(png->pRows[y] + column_index * 4, color_bg, 4);
+    }
 }
 
 
@@ -175,30 +273,7 @@ void draw_waveform(WaveformPNG *png, AudioData *data) {
     int sample_min;
     int sample_max;
 
-    // figure out the range of sample values we're dealing with
-    switch (data->format) {
-        case SAMPLE_FORMAT_FLOAT:
-        case SAMPLE_FORMAT_DOUBLE:
-            // floats and doubles have a range of -1.0 to 1.0
-            // NOTE: It is entirely possible for a sample to go beyond this range. Any value outside
-            // is considered beyond full volume. Be aware of this when doing math with sample values.
-            sample_min = -1;
-            sample_max = 1;
-
-            break;
-        case SAMPLE_FORMAT_UINT8:
-            sample_min = 0;
-            sample_max = 255;
-
-            break;
-        default:
-            // we're dealing with integers, so the range of samples is going to be the min/max values
-            // of signed integers of either 16 or 32 bit (24 bit formats get converted to 32 bit at
-            // the AVFrame level):
-            //  -32,768/32,767, or -2,147,483,648/2,147,483,647
-            sample_min = pow(2, data->sample_size * 8) / -2;
-            sample_max = pow(2, data->sample_size * 8) / 2 - 1;
-    }
+    get_format_range(data->format, &sample_min, &sample_max);
 
     uint32_t sample_range = sample_max - sample_min; // total range of values a sample can have
     int sample_count = data->size / data->sample_size / data->channels; // samples per channel
@@ -207,9 +282,51 @@ void draw_waveform(WaveformPNG *png, AudioData *data) {
     // it doesn't yet care about, but we still need to know about all of them.
     int samples_per_pixel = (sample_count / png->width) * data->channels;
 
-    // for each column of pixels in the final output image
+    // make it so that the total amount of padding is 10% of the height of the image
+    int padding = (int) (png->height * 0.1 / data->channels);
+
+    // how tall should each channel be. Because the height is variable, it is quite possible
+    // that each channel height will not be uniform. Figure out how big each channel would
+    // be in a perfect world, and then figure out how wrong our guess is so we can correct for
+    // it later.
+    double ch = (png->height - (padding * (data->channels + 1))) / (double) data->channels;
+    double lost_height = ch - floor(ch);
+    int base_channel_height = floor(ch);
+
+    // as we iterate, we'll see which channel needs additional height to account for floating
+    // point/rounding errors. whenever total_lost_height becomes > 1, it means we need to
+    // add an additional pixel (or possibly more) to this channel height.
+    double total_lost_height = 0.0;
+
+    int start_y = 0; //where should we start drawing this channel (include TOP padding only)
+    int end_y = 0; //where should we stop drawing this channel (include TOP padding only)
+
+    // for each channel in the input file
     int c;
     for (c = 0; c < data->channels; ++c) {
+        int channel_height = base_channel_height;
+
+        // does this channel need to be boosted in height because of rounding errors?
+        total_lost_height += lost_height;
+
+        if (total_lost_height > 1) {
+            // yes.
+            channel_height += total_lost_height - floor(total_lost_height);
+            total_lost_height -= floor(total_lost_height);
+        }
+
+        // figure out the start and end heights for drawing this channel
+        start_y = end_y;
+        end_y = start_y + channel_height + padding;
+
+        // if this is the last channel being drawn, set the end to be the bottom of the image.
+        // this is sufficient enough to add the padding to the bottom of the image and correct
+        // for any remaining rounding errors
+        if (c == data->channels - 1) {
+            end_y = png->height - 1;
+        }
+
+        // for each column of pixels in the output image
         int x;
         for (x = 0; x < png->width; ++x) {
             // find the minimum sample value, and the maximum
@@ -217,40 +334,11 @@ void draw_waveform(WaveformPNG *png, AudioData *data) {
             double min = sample_max;
             double max = sample_min;
 
+            // find out the min and max sample values in this column of pixels
             int i;
             for (i = c; i < samples_per_pixel; i += data->channels) {
-                double value = 0;
                 int index = x * samples_per_pixel + i;
-
-                switch (data->format) {
-                    case SAMPLE_FORMAT_UINT8:
-                        value += data->samples[index];
-                        break;
-                    case SAMPLE_FORMAT_INT16:
-                        value += ((int16_t *) data->samples)[index];
-                        break;
-                    case SAMPLE_FORMAT_INT32:
-                        value += ((int32_t *) data->samples)[index];
-                        break;
-                    case SAMPLE_FORMAT_FLOAT:
-                        value += ((float *) data->samples)[index];
-                        break;
-                    case SAMPLE_FORMAT_DOUBLE:
-                        value += ((double *) data->samples)[index];
-                        break;
-                }
-
-                // if the value is over or under the floating point range (which it perfectly fine
-                // according to ffmpeg), we need to truncate it to still be within our range of
-                // -1.0 to 1.0, otherwise some of our latter math will have a bad case of
-                // the segfault sads.
-                if (data->format == SAMPLE_FORMAT_DOUBLE || data->format == SAMPLE_FORMAT_FLOAT) {
-                    if (value < -1.0) {
-                        value = -1.0;
-                    } else if (value > 1.0) {
-                        value = 1.0;
-                    }
-                }
+                double value = get_sample(data, index);
 
                 if (value < min) {
                     min = value;
@@ -261,33 +349,20 @@ void draw_waveform(WaveformPNG *png, AudioData *data) {
                 }
             }
 
-            int start_y = (png->height / data->channels) * c;
-            int end_y = start_y + (png->height / data->channels) - 1;
-            int channel_height = end_y - start_y;
+            // calculate where to draw the waveform in the channel range
+            int waveform_top = (max - sample_min) * channel_height / sample_range;
+            int waveform_bottom = (min - sample_min) * channel_height / sample_range;
 
-            // calculate the y pixel values that represent the waveform for this column of pixels.
-            // they are subtracted from last_y to flip the waveform image, putting positive
-            // numbers above the center of waveform and negative numbers below.
-            int y_max = start_y + channel_height - ((min - sample_min) * channel_height / sample_range);
-            int y_min = start_y + channel_height - ((max - sample_min) * channel_height / sample_range);
+            // flip it (drawing coordinates go from 0 to h, but audio wants positive samples
+            // on top and negative samples below with 0 in the center of the channel
+            waveform_bottom = channel_height - waveform_bottom;
+            waveform_top = channel_height - waveform_top;
 
-            // start drawing from the bottom
-            int y = end_y;
-
-            // draw the bottom background
-            for (; y > y_max; --y) {
-                memcpy(png->pRows[y] + x * 4, color_bg, 4);
-            }
-
-            // draw the waveform from the bottom to top
-            for (; y >= y_min; --y) {
-                memcpy(png->pRows[y] + x * 4, color_waveform, 4);
-            }
-
-            // draw the top background
-            for (; y >= start_y; --y) {
-                memcpy(png->pRows[y] + x * 4, color_bg, 4);
-            }
+            // offset calculations to account for padding on the top
+            waveform_top += start_y + padding;
+            waveform_bottom += start_y + padding;
+            
+            draw_column_segment(png, x, start_y, end_y, waveform_top, waveform_bottom);
         }
     }
 }
@@ -304,30 +379,7 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
     int sample_min;
     int sample_max;
 
-    // figure out the range of sample values we're dealing with
-    switch (data->format) {
-        case SAMPLE_FORMAT_FLOAT:
-        case SAMPLE_FORMAT_DOUBLE:
-            // floats and doubles have a range of -1.0 to 1.0
-            // NOTE: It is entirely possible for a sample to go beyond this range. Any value outside
-            // is considered beyond full volume. Be aware of this when doing math with sample values.
-            sample_min = -1;
-            sample_max = 1;
-
-            break;
-        case SAMPLE_FORMAT_UINT8:
-            sample_min = 0;
-            sample_max = 255;
-
-            break;
-        default:
-            // we're dealing with integers, so the range of samples is going to be the min/max values
-            // of signed integers of either 16 or 32 bit (24 bit formats get converted to 32 bit at
-            // the AVFrame level):
-            //  -32,768/32,767, or -2,147,483,648/2,147,483,647
-            sample_min = pow(2, data->sample_size * 8) / -2;
-            sample_max = pow(2, data->sample_size * 8) / 2 - 1;
-    }
+    get_format_range(data->format, &sample_min, &sample_max); 
 
     uint32_t sample_range = sample_max - sample_min; // total range of values a sample can have
     int sample_count = data->size / data->sample_size; // how many samples are there total?
@@ -355,35 +407,7 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
             for (c = 0; c < data->channels; ++c) {
                 int index = x * samples_per_pixel + i + c;
 
-                switch (data->format) {
-                    case SAMPLE_FORMAT_UINT8:
-                        value += data->samples[index] * channel_average_multiplier;
-                        break;
-                    case SAMPLE_FORMAT_INT16:
-                        value += ((int16_t *) data->samples)[index] * channel_average_multiplier;
-                        break;
-                    case SAMPLE_FORMAT_INT32:
-                        value += ((int32_t *) data->samples)[index] * channel_average_multiplier;
-                        break;
-                    case SAMPLE_FORMAT_FLOAT:
-                        value += ((float *) data->samples)[index] * channel_average_multiplier;
-                        break;
-                    case SAMPLE_FORMAT_DOUBLE:
-                        value += ((double *) data->samples)[index] * channel_average_multiplier;
-                        break;
-                }
-            }
-
-            // if the value is over or under the floating point range (which it perfectly fine
-            // according to ffmpeg), we need to truncate it to still be within our range of
-            // -1.0 to 1.0, otherwise some of our latter math will have a bad case of
-            // the segfault sads.
-            if (data->format == SAMPLE_FORMAT_DOUBLE || data->format == SAMPLE_FORMAT_FLOAT) {
-                if (value < -1.0) {
-                    value = -1.0;
-                } else if (value > 1.0) {
-                    value = 1.0;
-                }
+                value = get_sample(data, index) * channel_average_multiplier;
             }
 
             if (value < min) {
@@ -401,23 +425,7 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
         int y_max = last_y - ((min - sample_min) * last_y / sample_range);
         int y_min = last_y - ((max - sample_min) * last_y / sample_range);
 
-        // start drawing from the bottom
-        int y = last_y;
-
-        // draw the bottom background
-        for (; y > y_max; --y) {
-            memcpy(png->pRows[y] + x * 4, color_bg, 4);
-        }
-
-        // draw the waveform from the bottom to top
-        for (; y >= y_min; --y) {
-            memcpy(png->pRows[y] + x * 4, color_waveform, 4);
-        }
-
-        // draw the top background
-        for (; y >= 0; --y) {
-            memcpy(png->pRows[y] + x * 4, color_bg, 4);
-        }
+        draw_column_segment(png, x, 0, last_y, y_min, y_max);
     }
 }
 
@@ -588,6 +596,21 @@ void cleanup(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
 
 
 
+/*
+png_bytep read_color(uint32_t hex) {
+    png_bytep color = malloc(sizeof(png_byte));
+
+    color[0] = (hex >> 24) & 0xFF; // red
+    color[1] = (hex >> 16) & 0xFF; // green
+    color[2] = (hex >> 8) & 0xFF; // blue
+    color[3] = hex & 0xFF;  // alpha
+
+    return color;
+}
+*/
+
+
+
 int main(int argc, char *argv[]) {
     int width = 256; // default width of the generated png image
     int height = -1; // default height of the generated png image
@@ -604,6 +627,8 @@ int main(int argc, char *argv[]) {
     int c;
     while ((c = getopt(argc, argv, "i:o:vmw:h:t:")) != -1) {
         switch (c) {
+            //case 'c': color_waveform = read_color(atol(optarg)); break;
+            //case 'b': color_bg = read_color(atol(optarg)); break;
             case 'i': pFilePath = optarg; break;
             case 'm': monofy = 1; break;
             case 'o': pOutFile = optarg; break;
