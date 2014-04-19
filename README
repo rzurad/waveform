@@ -51,6 +51,5 @@ Dependencies:
     libpng 1.5.18
 
 TODO:
-    add padding between channels
     fix help text
     Pass in color information

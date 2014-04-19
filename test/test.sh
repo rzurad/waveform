@@ -46,7 +46,7 @@ do
 
     if [ "$all" == "all" ];
     then
-        run "$f" "$f.monofied.png" "-h 400 -w 1600 -m"
+        run "$f" "$f.monofied.png" "-h 600 -w 1600 -m"
         run "$f" "$f.png" "-t 400 -w 1600"
         run "$f" "$f.fixed.png" "-h 800 -w 1600"
     fi

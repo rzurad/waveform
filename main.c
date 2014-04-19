@@ -17,10 +17,9 @@
     C Program to draw png images of the waveform of a given audio file.
     Uses ffmpeg 2.1 to read the audio file and libpng to draw the image.
 
-    Distributed under the WTFPL: http://www.wtfpl.net/faq/
+    Built for FreeBSD 10
 
-    TODO: There are enough similarities between draw_waveform and draw_combined_waveform
-    that they can probably be refactored and genericized.
+    Distributed under the WTFPL: http://www.wtfpl.net/faq/
 
     http://github.com/rzurad/waveform
  */
@@ -168,6 +167,10 @@ void free_audio_data(AudioData *data) {
 
 
 
+// get the sample at the given index out of the audio file data.
+//
+// NOTE: This function expects the caller to know what index to grab based on
+// the data's sample size and channel count. It does not magic of its own.
 double get_sample(AudioData *data, int index) {
     double value = 0.0;
 
@@ -206,6 +209,8 @@ double get_sample(AudioData *data, int index) {
 
 
 
+// get the min and max values a sample can have given the format and put them
+// into the min and max out parameters
 void get_format_range(enum SampleFormat format, int *min, int *max) {
     int size;
 
@@ -226,7 +231,6 @@ void get_format_range(enum SampleFormat format, int *min, int *max) {
 
             break;
         default:
-
             // we're dealing with integers, so the range of samples is going to be the min/max values
             // of signed integers of either 16 or 32 bit (24 bit formats get converted to 32 bit at
             // the AVFrame level):
@@ -239,6 +243,9 @@ void get_format_range(enum SampleFormat format, int *min, int *max) {
 
 
 
+// draw a column segment in the output image. It will draw in the x coordinate given by
+// column_index, draw the background color between start_y and end_y coordinates,
+// and draw the waveform color between waveform_top and waveform_bottom coordinates.
 void draw_column_segment(WaveformPNG *png,
                          int column_index,
                          int start_y,
@@ -388,6 +395,10 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
     // multipliers used to produce averages while iterating through samples.
     double channel_average_multiplier = 1.0 / data->channels;
 
+    // 10% padding
+    int padding = (int) (png->height * 0.05);
+    int track_height = png->height - (padding * 2);
+
     // for each column of pixels in the final output image
     int x;
     for (x = 0; x < png->width; ++x) {
@@ -407,7 +418,7 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
             for (c = 0; c < data->channels; ++c) {
                 int index = x * samples_per_pixel + i + c;
 
-                value = get_sample(data, index) * channel_average_multiplier;
+                value += get_sample(data, index) * channel_average_multiplier;
             }
 
             if (value < min) {
@@ -422,8 +433,8 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
         // calculate the y pixel values that represent the waveform for this column of pixels.
         // they are subtracted from last_y to flip the waveform image, putting positive
         // numbers above the center of waveform and negative numbers below.
-        int y_max = last_y - ((min - sample_min) * last_y / sample_range);
-        int y_min = last_y - ((max - sample_min) * last_y / sample_range);
+        int y_max = track_height - ((min - sample_min) * track_height / sample_range) + padding;
+        int y_min = track_height - ((max - sample_min) * track_height / sample_range) + padding;
 
         draw_column_segment(png, x, 0, last_y, y_min, y_max);
     }
