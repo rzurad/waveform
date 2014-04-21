@@ -26,14 +26,17 @@
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
+#include <math.h>
 #include <png.h>
 #include <stdio.h>
-#include <math.h>
+#include <stdlib.h>
 #include <unistd.h>
+
 
 
 png_byte color_waveform[4] = {89, 89, 89, 255};
 png_byte color_bg[4] = {255, 255, 255, 255};
+
 
 
 // struct for creating PNG images.
@@ -444,11 +447,53 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
 
 // print out help text saying how to use this program and exit
 void help() {
-    fprintf(stdout, "\n\nGenerate waveform images from audio files.\n\n");
-    fprintf(stdout, "   -i [input audio file]       [REQUIRED] Path to input audio file to process.\n");
-    fprintf(stdout, "   -o [output png file]        Output PNG file. Will default to stdout if not specified\n");
-    fprintf(stdout, "   -w [width]                  The desired width of the output PNG. Defaults to 256\n");
-    fprintf(stdout, "   -h [height]                 The desired height of the output PNG. Defaults to 64\n\n");
+	fprintf(stdout, "NAME\n\n");
+	fprintf(stdout, "    waveform - generates a png image of the waveform of a given audio file.\n\n");
+	fprintf(stdout, "SYNOPSIS\n\n");
+	fprintf(stdout, "    waveform [options]\n\n");
+	fprintf(stdout, "DESCRIPTION\n\n");
+	fprintf(stdout, "    Waveform uses ffmpeg and libpng to read an audio file and output a png\n");
+	fprintf(stdout, "    image of the waveform representing the audio file's contents.\n\n");
+	fprintf(stdout, "    By default, the image will render a waveform for each channel of the\n");
+	fprintf(stdout, "    audio file with the height of the image determined by the number of\n");
+	fprintf(stdout, "    channels in the input file.\n\n");
+	fprintf(stdout, "OPTIONS\n\n");
+	fprintf(stdout, "    -i FILE\n");
+	fprintf(stdout, "            Input file to parse. Can be any format/codec that can be read by\n");
+	fprintf(stdout, "            the installed ffmpeg.\n\n");
+	fprintf(stdout, "    -o FILE\n");
+	fprintf(stdout, "            Output file for PNG. If -o is omitted, the png will be written\n");
+	fprintf(stdout, "            to stdout.\n\n");
+	fprintf(stdout, "    -m\n");
+	fprintf(stdout, "            Produce a single channel waveform. Each channel will be averaged\n");
+	fprintf(stdout, "            together to produce the final channel. The -h and -t options\n");
+	fprintf(stdout, "            behave as they would when supplied a monaural file.\n\n");
+	fprintf(stdout, "    -h NUM\n");
+	fprintf(stdout, "            Height of output image. The height of each channel will be\n\n");
+	fprintf(stdout, "            constrained so that all channels can fit within the specified\n\n");
+	fprintf(stdout, "            height.\n\n");
+	fprintf(stdout, "            If used with the -t option, -h defines the maximum height the\n");
+	fprintf(stdout, "            generated image can have.\n\n");
+	fprintf(stdout, "            If all tracks can have a height of -t with the final image being\n");
+	fprintf(stdout, "            below the height defined by -h, the output image will have a\n");
+	fprintf(stdout, "            height of -t multiplied by the number of channels in the input\n");
+	fprintf(stdout, "            file. If not, the output image will have a height of -h.\n\n");
+	fprintf(stdout, "    -t NUM [default 64]\n");
+	fprintf(stdout, "            Height of each track in the output image. The final height of the\n");
+	fprintf(stdout, "            output png will be this value multiplied by the number of channels\n");
+	fprintf(stdout, "            in the audio stream.\n\n");
+	fprintf(stdout, "            If you use the -t option together with the -h option, the final\n");
+	fprintf(stdout, "            output will use -t if all tracks can fit within the height\n");
+	fprintf(stdout, "            constraint defined by the -h option. If they can not, the track\n");
+	fprintf(stdout, "            height will be adjusted to fit within the -h option.\n\n");
+	fprintf(stdout, "    -w NUM [default 256]\n");
+	fprintf(stdout, "            Width of output PNG image\n\n");
+	fprintf(stdout, "    -c HEX [default 595959ff]\n");
+	fprintf(stdout, "            Set the color of the waveform. Color is specified in hex format:\n");
+	fprintf(stdout, "            RRGGBBAA or 0xRRGGBBAA\n\n");
+	fprintf(stdout, "    -b HEX [default ffffffff]\n");
+	fprintf(stdout, "            Set the background color of the image. Color is specified in hex\n");
+	fprintf(stdout, "            format: RRGGBBAA or 0xRRGGBBAA.\n\n");
     exit(1);
 }
 
@@ -607,18 +652,13 @@ void cleanup(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
 
 
 
-/*
-png_bytep read_color(uint32_t hex) {
-    png_bytep color = malloc(sizeof(png_byte));
 
+void read_color(uint32_t hex, png_byte *color) {
     color[0] = (hex >> 24) & 0xFF; // red
     color[1] = (hex >> 16) & 0xFF; // green
     color[2] = (hex >> 8) & 0xFF; // blue
     color[3] = hex & 0xFF;  // alpha
-
-    return color;
 }
-*/
 
 
 
@@ -636,10 +676,10 @@ int main(int argc, char *argv[]) {
 
     // command line arg parsing
     int c;
-    while ((c = getopt(argc, argv, "i:o:vmw:h:t:")) != -1) {
+    while ((c = getopt(argc, argv, "c:b:i:o:vmw:h:t:")) != -1) {
         switch (c) {
-            //case 'c': color_waveform = read_color(atol(optarg)); break;
-            //case 'b': color_bg = read_color(atol(optarg)); break;
+            case 'c': read_color(strtol(optarg, NULL, 16), &color_waveform[0]); break;
+            case 'b': read_color(strtol(optarg, NULL, 16), &color_bg[0]); break;
             case 'i': pFilePath = optarg; break;
             case 'm': monofy = 1; break;
             case 'o': pOutFile = optarg; break;
