@@ -116,7 +116,7 @@ Calling waveform with the following options on a stereo file produces the follow
     ./waveform -i parachute.mp3 -h 800 -t 600 -w 1600 -b f3f3f3ff
 ![](test/examples/parachute.png)
 
-Notice that since this was a stereo file and 600 * 2 > 800, the final image size is restricted to 800 pixels. However, if we make the same call supplying a mono mix of the same file, the output image has a height of 600, since 600 * 1 / 2 < 800.
+Notice that since this was a stereo file and 600 * 2 > 800, the final image size is restricted to 800 pixels. However, if we make the same call supplying a mono mix of the same file, the output image has a height of 600, since 600 * 1 < 800.
 
     ./waveform -i parachute_mono.mp3 -h 800 -t 600 -w 1600 -b f3f3f3ff
 ![](test/examples/parachute_mono.png)
