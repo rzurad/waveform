@@ -1,3 +1,15 @@
+Audio waveform image generator
+====
+
+    ./waveform -i 1hz-10khz-sweep.flac -h 400 -w 1600 -m -c 89d1f3ff -b 474b50ff
+![](test/examples/1hz-10khz-sweep.png)
+
+    ./waveform -i dialup.wav -h 400 -w 1600 -c ffffffff -b 000000ff
+![](test/examples/dialup.png)
+
+How to use
+===
+
 **Name**
 
     waveform - generates a png image of the waveform of a given audio file.
@@ -9,7 +21,9 @@
 **Description**
 
     Waveform uses ffmpeg and libpng to read an audio file and output a png
-    image of the waveform representing the audio file's contents.
+    image of the waveform representing the audio file's contents. Any audio
+    container/codec combination that can be read by your build of ffmpeg
+    should be supported.
 
     The fidelity of the produced waveform will be determined by the
     dimensions of the output png. Larger images will have more waveform
@@ -120,13 +134,3 @@ Notice that since this was a stereo file and 600 * 2 > 800, the final image size
 
     ./waveform -i parachute_mono.mp3 -h 800 -t 600 -w 1600 -b f3f3f3ff
 ![](test/examples/parachute_mono.png)
-
-More examples:
-----
-
-    ./waveform -i 1hz-10khz-sweep.flac -h 400 -w 1600 -m -c 89d1f3ff -b 474b50ff
-![](test/examples/1hz-10khz-sweep.png)
-
-    ./waveform -i dialup.wav -h 400 -w 1600 -c ffffffff -b 000000ff
-![](test/examples/dialup.png)
-
