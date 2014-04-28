@@ -37,7 +37,7 @@
 png_byte color_waveform[4] = {89, 89, 89, 255};
 png_byte color_bg[4] = {255, 255, 255, 255};
 
-
+char version[] = "Waveform 0.9.1";
 
 // struct for creating PNG images.
 typedef struct WaveformPNG {
@@ -63,6 +63,7 @@ enum SampleFormat {
 typedef struct AudioData {
     /*
      * The `samples` buffer is an interleaved buffer of all the raw samples from the audio file.
+     * This is populated by calling `read_audio_data`
      *
      * Recall that audio data can be either planar (one buffer or "plane" for each channel) or
      * interleaved (one buffer for all channels: in a stereo file, the first sample for the left
@@ -76,9 +77,26 @@ typedef struct AudioData {
     uint8_t *samples;
 
     /*
-     * The size of the `samples` buffer.
+     * The size of the `samples` buffer. Not known until after a call to `read_audio_data` or
+     * `read_audio_metadata`
      */
     int size;
+
+    /*
+     * Length of audio file in seconds. Not known until after a call to `read_audio_data` or
+     * `read_audio_metadata`
+     *
+     * This is calculated after reading all the raw samples from the audio file,
+     * making it much more accurate than what the header or a bit rate based
+     * guess
+     */
+    double duration;
+
+    /*
+     * sample rate of the audio file (44100, 48000, etc). Not known until after a call
+     * to `read_audio_data` or `read_audio_metadata`
+     */
+    int sample_rate;
 
     /*
      * Number of bytes per sample. Use together with `size` and `format` to pull data from
@@ -91,8 +109,19 @@ typedef struct AudioData {
      */
     enum SampleFormat format;
 
-    // how many channels does the audio file have? 1 (mono)? 2 (stereo)
+    // how many channels does the audio file have? 1 (mono)? 2 (stereo)? ...
     int channels;
+
+    /*
+     * Format context from ffmpeg, which is the wrapper for the input audio file
+     */
+    AVFormatContext *format_context;
+
+    /*
+     * Codec context from ffmpeg. This is what gets us to all the raw
+     * audio data.
+     */
+    AVCodecContext *decoder_context;
 } AudioData;
 
 
@@ -146,9 +175,26 @@ WaveformPNG init_png(const char *pOutFile, int width, int height) {
 
 // write the data in the given WaveformPNG struct to an actual output file (or stdout)
 void write_png(WaveformPNG *pWaveformPNG) {
+    // write an Author string into the PNG's metadata saying it came from this
+    // version of Waveform
+    png_text author_text;
+    author_text.compression = PNG_TEXT_COMPRESSION_NONE;
+    author_text.key = "Author";
+    author_text.text = version;
+
+    png_set_text(pWaveformPNG->png, pWaveformPNG->png_info, &author_text, 1);
+
     png_write_info(pWaveformPNG->png, pWaveformPNG->png_info);
     png_write_image(pWaveformPNG->png, pWaveformPNG->pRows);
     png_write_end(pWaveformPNG->png, pWaveformPNG->png_info);
+}
+
+
+
+// close and free ffmpeg structs
+void cleanup(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
+    avformat_close_input(&pFormatContext);
+    avcodec_close(pDecoderContext);
 }
 
 
@@ -164,7 +210,12 @@ void close_png(WaveformPNG *pWaveformPNG) {
 
 // free memory allocated by an AudioData struct
 void free_audio_data(AudioData *data) {
-    free(data->samples);
+    cleanup(data->format_context, data->decoder_context);
+
+    if (data->samples != NULL) {
+        free(data->samples);
+    }
+
     free(data);
 }
 
@@ -447,89 +498,87 @@ void draw_combined_waveform(WaveformPNG *png, AudioData *data) {
 
 // print out help text saying how to use this program and exit
 void help() {
-    fprintf(stdout, "NAME\n\n");
-    fprintf(stdout, "    waveform - generates a png image of the waveform of a given audio file.\n\n");
-    fprintf(stdout, "SYNOPSIS\n\n");
-    fprintf(stdout, "    waveform [options]\n\n");
-    fprintf(stdout, "DESCRIPTION\n\n");
-    fprintf(stdout, "    Waveform uses ffmpeg and libpng to read an audio file and output a png\n");
-    fprintf(stdout, "    image of the waveform representing the audio file's contents. Any audio\n");
-    fprintf(stdout, "    container/codec combination that can be read by your build of ffmpeg\n");
-    fprintf(stdout, "    should be supported.\n\n");
-    fprintf(stdout, "    The fidelity of the produced waveform will be determined by the\n");
-    fprintf(stdout, "    dimensions of the output png. Larger images will have more waveform\n");
-    fprintf(stdout, "    detail than smaller images. To preserve waveform fidelity, you can\n");
-    fprintf(stdout, "    have this program output a large image that is then rescaled using\n");
-    fprintf(stdout, "    another program, such as ImageMagick.\n\n");
-    fprintf(stdout, "    By default, the image will render a waveform for each channel of the\n");
-    fprintf(stdout, "    audio file with the height of the image determined by the number of\n");
-    fprintf(stdout, "    channels in the input file.\n\n");
-    fprintf(stdout, "OPTIONS\n\n");
-    fprintf(stdout, "    -i FILE\n");
-    fprintf(stdout, "            Input file to parse. Can be any format/codec that can be read by\n");
-    fprintf(stdout, "            the installed ffmpeg.\n\n");
-    fprintf(stdout, "    -o FILE\n");
-    fprintf(stdout, "            Output file for PNG. If -o is omitted, the png will be written\n");
-    fprintf(stdout, "            to stdout.\n\n");
-    fprintf(stdout, "    -m\n");
-    fprintf(stdout, "            Produce a single channel waveform. Each channel will be averaged\n");
-    fprintf(stdout, "            together to produce the final channel. The -h and -t options\n");
-    fprintf(stdout, "            behave as they would when supplied a monaural file.\n\n");
-    fprintf(stdout, "    -h NUM\n");
-    fprintf(stdout, "            Height of output image. The height of each channel will be\n\n");
-    fprintf(stdout, "            constrained so that all channels can fit within the specified\n\n");
-    fprintf(stdout, "            height.\n\n");
-    fprintf(stdout, "            If used with the -t option, -h defines the maximum height the\n");
-    fprintf(stdout, "            generated image can have.\n\n");
-    fprintf(stdout, "            If all tracks can have a height of -t with the final image being\n");
-    fprintf(stdout, "            below the height defined by -h, the output image will have a\n");
-    fprintf(stdout, "            height of -t multiplied by the number of channels in the input\n");
-    fprintf(stdout, "            file. If not, the output image will have a height of -h.\n\n");
-    fprintf(stdout, "    -t NUM [default 64]\n");
-    fprintf(stdout, "            Height of each track in the output image. The final height of the\n");
-    fprintf(stdout, "            output png will be this value multiplied by the number of channels\n");
-    fprintf(stdout, "            in the audio stream.\n\n");
-    fprintf(stdout, "            If you use the -t option together with the -h option, the final\n");
-    fprintf(stdout, "            output will use -t if all tracks can fit within the height\n");
-    fprintf(stdout, "            constraint defined by the -h option. If they can not, the track\n");
-    fprintf(stdout, "            height will be adjusted to fit within the -h option.\n\n");
-    fprintf(stdout, "    -w NUM [default 256]\n");
-    fprintf(stdout, "            Width of output PNG image\n\n");
-    fprintf(stdout, "    -c HEX [default 595959ff]\n");
-    fprintf(stdout, "            Set the color of the waveform. Color is specified in hex format:\n");
-    fprintf(stdout, "            RRGGBBAA or 0xRRGGBBAA\n\n");
-    fprintf(stdout, "    -b HEX [default ffffffff]\n");
-    fprintf(stdout, "            Set the background color of the image. Color is specified in hex\n");
-    fprintf(stdout, "            format: RRGGBBAA or 0xRRGGBBAA.\n\n");
+    printf("%s\n\n", version);
+    printf("NAME\n\n");
+    printf("    waveform - generates a png image of the waveform of a given audio file.\n\n");
+    printf("SYNOPSIS\n\n");
+    printf("    waveform [options]\n\n");
+    printf("DESCRIPTION\n\n");
+    printf("    Waveform uses ffmpeg and libpng to read an audio file and output a png\n");
+    printf("    image of the waveform representing the audio file's contents. Any audio\n");
+    printf("    container/codec combination that can be read by your build of ffmpeg\n");
+    printf("    should be supported.\n\n");
+    printf("    The fidelity of the produced waveform will be determined by the\n");
+    printf("    dimensions of the output png. Larger images will have more waveform\n");
+    printf("    detail than smaller images. To preserve waveform fidelity, you can\n");
+    printf("    have this program output a large image that is then rescaled using\n");
+    printf("    another program, such as ImageMagick.\n\n");
+    printf("    By default, the image will render a waveform for each channel of the\n");
+    printf("    audio file with the height of the image determined by the number of\n");
+    printf("    channels in the input file.\n\n");
+    printf("    Waveform can also be used to get accurate data about the given input file\n");
+    printf("    (more accurate than ffprobe can be depending on the input format) via\n");
+    printf("    the -d option.\n\n");
+    printf("OPTIONS\n\n");
+    printf("    -b HEX [default ffffffff]\n");
+    printf("            Set the background color of the image. Color is specified in hex\n");
+    printf("            format: RRGGBBAA or 0xRRGGBBAA.\n\n");
+    printf("    -c HEX [default 595959ff]\n");
+    printf("            Set the color of the waveform. Color is specified in hex format:\n");
+    printf("            RRGGBBAA or 0xRRGGBBAA\n\n");
+    printf("    -d\n");
+    printf("            Do not generate an image, but instead print out file metadata to\n");
+    printf("            standard out. This is mostly useful to find the actual duration\n");
+    printf("            of an input file, since ffprobe can occasionally be inacurate in\n");
+    printf("            its prediction of duration.\n\n");
+    printf("    -h NUM\n");
+    printf("            Height of output image. The height of each channel will be\n\n");
+    printf("            constrained so that all channels can fit within the specified\n\n");
+    printf("            height.\n\n");
+    printf("            If used with the -t option, -h defines the maximum height the\n");
+    printf("            generated image can have.\n\n");
+    printf("            If all tracks can have a height of -t with the final image being\n");
+    printf("            below the height defined by -h, the output image will have a\n");
+    printf("            height of -t multiplied by the number of channels in the input\n");
+    printf("            file. If not, the output image will have a height of -h.\n\n");
+    printf("    -i FILE\n");
+    printf("            Input file to parse. Can be any format/codec that can be read by\n");
+    printf("            the installed ffmpeg.\n\n");
+    printf("    -m\n");
+    printf("            Produce a single channel waveform. Each channel will be averaged\n");
+    printf("            together to produce the final channel. The -h and -t options\n");
+    printf("            behave as they would when supplied a monaural file.\n\n");
+    printf("    -o FILE\n");
+    printf("            Output file for PNG. If -o is omitted, the png will be written\n");
+    printf("            to stdout.\n\n");
+    printf("    -t NUM [default 64]\n");
+    printf("            Height of each track in the output image. The final height of the\n");
+    printf("            output png will be this value multiplied by the number of channels\n");
+    printf("            in the audio stream.\n\n");
+    printf("            If you use the -t option together with the -h option, the final\n");
+    printf("            output will use -t if all tracks can fit within the height\n");
+    printf("            constraint defined by the -h option. If they can not, the track\n");
+    printf("            height will be adjusted to fit within the -h option.\n\n");
+    printf("    -w NUM [default 256]\n");
+    printf("            Width of output PNG image\n\n");
     exit(1);
 }
 
 
 
-// Takes a given AVFormatContext and AVCodecContext from ffmpeg, extracts the raw sample
-// information and dumps it into the returned AudioData struct
-AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
-    // Packets will contain chucks of compressed audio data read from the audio file.
-    AVPacket packet;
-
-    // Frames will contain the raw uncompressed audio data read from a packet
-    AVFrame *pFrame = NULL;
-
-    // how long in seconds is the audio file?
-    double duration = pFormatContext->duration / (double) AV_TIME_BASE;
-
-    // is the audio interleaved or planar?
-    int is_planar = av_sample_fmt_is_planar(pDecoderContext->sample_fmt);
-
-    // running total of how much data has been converted to raw and copied into the AudioData
-    // `samples` buffer. This will eventually be `data->size`
-    int total_size = 0;
-
+/*
+ * Take an ffmpeg AVFormatContext and AVCodecContext struct and create and AudioData struct
+ * that we can easily work with
+ */
+AudioData *create_audio_data_struct(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
     // Make the AudioData object we'll be returning
     AudioData *data = malloc(sizeof(AudioData));
+    data->format_context = pFormatContext;
+    data->decoder_context = pDecoderContext;
     data->format = pDecoderContext->sample_fmt;
     data->sample_size = (int) av_get_bytes_per_sample(pDecoderContext->sample_fmt); // *byte* depth
     data->channels = pDecoderContext->channels;
+    data->samples = NULL;
 
     // normalize the sample format to an enum that's less verbose than AVSampleFormat.
     // We won't care about planar/interleaved
@@ -560,17 +609,49 @@ AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDeco
             return NULL;
     }
 
+    return data;
+}
+
+
+
+/*
+ * Iterate through the audio file, converting all compressed samples into raw samples.
+ * This will populate all of the fields on the data struct, with the exception of
+ * the `samples` buffer if `populate_sample_buffer` is set to 0
+ */
+static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
+    // Packets will contain chucks of compressed audio data read from the audio file.
+    AVPacket packet;
+
+    // Frames will contain the raw uncompressed audio data read from a packet
+    AVFrame *pFrame = NULL;
+
+    // how long in seconds is the audio file?
+    double duration = data->format_context->duration / (double) AV_TIME_BASE;
+    int raw_sample_rate = 0;
+
+    // is the audio interleaved or planar?
+    int is_planar = av_sample_fmt_is_planar(data->decoder_context->sample_fmt);
+
+    // running total of how much data has been converted to raw and copied into the AudioData
+    // `samples` buffer. This will eventually be `data->size`
+    int total_size = 0;
+
     av_init_packet(&packet);
 
     if (!(pFrame = avcodec_alloc_frame())) {
         fprintf(stderr, "Could not allocate AVFrame\n");
         free_audio_data(data);
-        return NULL;
+        return;
     }
 
+    int allocated_buffer_size = 0;
+
     // guess how much memory we'll need for samples.
-    int allocated_buffer_size = (pFormatContext->bit_rate / 8) * duration;
-    data->samples = malloc(sizeof(uint8_t) * allocated_buffer_size);
+    if (populate_sample_buffer) {
+        allocated_buffer_size = (data->format_context->bit_rate / 8) * duration;
+        data->samples = malloc(sizeof(uint8_t) * allocated_buffer_size);
+    }
 
     // Loop through the entire audio file by reading a compressed packet of the stream
     // into the uncomrpressed frame struct and copy it into a buffer.
@@ -580,14 +661,14 @@ AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDeco
     //
     // It's up to anything using the AudioData struct to know how to properly read the data
     // inside `samples`
-    while (av_read_frame(pFormatContext, &packet) == 0) {
+    while (av_read_frame(data->format_context, &packet) == 0) {
         // some audio formats might not contain an entire raw frame in a single compressed packet.
         // If this is the case, then decode_audio4 will tell us that it didn't get all of the
         // raw frame via this out argument.
         int frame_finished = 0;
 
         // Use the decoder to populate the raw frame with data from the compressed packet.
-        if (avcodec_decode_audio4(pDecoderContext, pFrame, &frame_finished, &packet) < 0) {
+        if (avcodec_decode_audio4(data->decoder_context, pFrame, &frame_finished, &packet) < 0) {
             // unable to decode this packet. continue on to the next packet
             continue;
         }
@@ -600,12 +681,16 @@ AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDeco
                 is_planar ? &pFrame->linesize[0] : NULL,
                 data->channels,
                 pFrame->nb_samples,
-                pDecoderContext->sample_fmt,
+                data->decoder_context->sample_fmt,
                 1
             );
 
+            if (raw_sample_rate == 0) {
+                raw_sample_rate = pFrame->sample_rate;
+            }
+
             // if we don't have enough space in our copy buffer, expand it
-            if (total_size + data_size > allocated_buffer_size) {
+            if (populate_sample_buffer && total_size + data_size > allocated_buffer_size) {
                 allocated_buffer_size = allocated_buffer_size * 1.25;
                 data->samples = realloc(data->samples, allocated_buffer_size);
             }
@@ -621,14 +706,20 @@ AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDeco
                 // two from left, then right, etc.)
                 for (; i < data_size / data->channels; i += data->sample_size) {
                     for (c = 0; c < data->channels; c++) {
-                        memcpy(data->samples + total_size, pFrame->extended_data[c] + i, data->sample_size);
+                        if (populate_sample_buffer) {
+                            memcpy(data->samples + total_size, pFrame->extended_data[c] + i, data->sample_size);
+                        }
+
                         total_size += data->sample_size;
                     }
                 }
             } else {
                 // source file is already interleaved. just copy the raw data from the frame into
                 // the `samples` buffer.
-                memcpy(data->samples + total_size, pFrame->extended_data[0], data_size);
+                if (populate_sample_buffer) {
+                    memcpy(data->samples + total_size, pFrame->extended_data[0], data_size);
+                }
+
                 total_size += data_size;
             }
         }
@@ -638,29 +729,57 @@ AudioData *get_audio_data(AVFormatContext *pFormatContext, AVCodecContext *pDeco
         av_free_packet(&packet);
     }
 
+    data->size = total_size;
+    data->sample_rate = raw_sample_rate;
+
     if (total_size == 0) {
         // not a single packet could be read.
-        free_audio_data(data);
-        return NULL;
+        return;
     }
 
-    data->size = total_size;
-
-    return data;
+    data->duration = (data->size * 8.0) / (raw_sample_rate * data->sample_size * 8.0 * data->channels);
 }
 
 
 
-// close and free ffmpeg structs
-void cleanup(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
-    avformat_close_input(&pFormatContext);
-    avcodec_close(pDecoderContext);
+/*
+ * Take the given AudioData struct and convert all the compressed data
+ * into the raw interleaved sample buffer.
+ *
+ * This function also calculates and populates the metadata information from
+ * `read_audio_metadata`.
+ */
+void read_audio_data(AudioData *data) {
+    read_raw_audio_data(data, 1);
 }
 
 
 
 
-void read_color(uint32_t hex, png_byte *color) {
+/*
+ * Take the given AudioData struct and calculate all of the properties
+ * without doing any of the memory operations on the raw sample data.
+ *
+ * This is so we can get accurate metadata about the file (which we can't
+ * really do for all formats unless we look at the raw data underneith, hence
+ * why somethings ffmpeg isn't entirely accurate with duration via ffprobe)
+ * without the overhead of image drawing.
+ *
+ * NOTE: data->samples will still not be valid after calling this function.
+ * If you care about this information but also want data->samples to be
+ * populated, use `read_audio_data` instead
+ */
+void read_audio_metadata(AudioData *data) {
+    read_raw_audio_data(data, 0);
+}
+
+
+
+/*
+ * Takes an incomming 32 bit unsigned integer representing an RGBa hex color
+ * and converts it to a png_byte color
+ */
+static void read_color(uint32_t hex, png_byte *color) {
     color[0] = (hex >> 24) & 0xFF; // red
     color[1] = (hex >> 16) & 0xFF; // green
     color[2] = (hex >> 8) & 0xFF; // blue
@@ -674,6 +793,7 @@ int main(int argc, char *argv[]) {
     int height = -1; // default height of the generated png image
     int track_height = -1; // default height of each track
     int monofy = 0; // should we reduce everything into one waveform
+    int metadata = 0; // should we just spit out metadata and not draw an image
     const char *pFilePath = NULL; // audio input file path
     const char *pOutFile = NULL; // image output file path. `NULL` means stdout
 
@@ -683,16 +803,17 @@ int main(int argc, char *argv[]) {
 
     // command line arg parsing
     int c;
-    while ((c = getopt(argc, argv, "c:b:i:o:vmw:h:t:")) != -1) {
+    while ((c = getopt(argc, argv, "c:b:i:o:dmw:h:t:")) != -1) {
         switch (c) {
-            case 'c': read_color(strtol(optarg, NULL, 16), &color_waveform[0]); break;
             case 'b': read_color(strtol(optarg, NULL, 16), &color_bg[0]); break;
+            case 'c': read_color(strtol(optarg, NULL, 16), &color_waveform[0]); break;
+            case 'd': metadata = 1; break;
+            case 'h': height = atol(optarg); break;
             case 'i': pFilePath = optarg; break;
             case 'm': monofy = 1; break;
             case 'o': pOutFile = optarg; break;
-            case 'w': width = atol(optarg); break;
             case 't': track_height = atol(optarg); break;
-            case 'h': height = atol(optarg); break;
+            case 'w': width = atol(optarg); break;
             default:
                 fprintf(stderr, "WARNING: Don't know what to do with argument %c\n", (char) c);
                 help();
@@ -755,36 +876,54 @@ int main(int argc, char *argv[]) {
         goto ERROR;
     }
 
-    // we have a stream that looks valid, so get all the raw samples from it
-    AudioData *data = get_audio_data(pFormatContext, pDecoderContext);
+    AudioData *data = create_audio_data_struct(pFormatContext, pDecoderContext);
+
     if (data == NULL) {
         goto ERROR;
     }
 
-    // if there is both a height and track_height and track height * channels will fit within
-    // height OR there is no height and we are not monofying:
-    if ((track_height > 0 && height > 0 && track_height * data->channels < height) ||
-            (height <= 0 && !monofy)) {
-        // set the image height equal to track_height * channels
-        height = track_height * data->channels;
-    }
+    if (metadata) {
+        // only fetch metadata about the file.
+        read_audio_metadata(data);
 
-    // init the png struct so we can start drawing
-    WaveformPNG png = init_png(pOutFile, width, height);
-
-    if (monofy) {
-        // if specified, call the drawing function that reduces all channels into a single
-        // waveform
-        draw_combined_waveform(&png, data);
+        printf("    %-*s: %f seconds\n", 15, "Duration", data->duration);
+        printf("    %-*s: %s\n", 15, "Compression", pDecoderContext->codec->name);
+        printf("    %-*s: %i Hz\n", 15, "Sample rate", data->sample_rate);
+        printf("    %-*s: %i\n", 15, "Channels", data->channels);
+        printf("    %-*s: %i b/s\n", 15, "Bit rate", pFormatContext->bit_rate);
     } else {
-        // otherwise, draw them all stacked individually
-        draw_waveform(&png, data);
+        // fetch the raw data and the metadata
+        read_audio_data(data);
+
+        if (data->size == 0) {
+            goto ERROR;
+        }
+
+        // if there is both a height and track_height and track height * channels will fit within
+        // height OR there is no height and we are not monofying:
+        if ((track_height > 0 && height > 0 && track_height * data->channels < height) ||
+                (height <= 0 && !monofy)) {
+            // set the image height equal to track_height * channels
+            height = track_height * data->channels;
+        }
+
+        // init the png struct so we can start drawing
+        WaveformPNG png = init_png(pOutFile, width, height);
+
+        if (monofy) {
+            // if specified, call the drawing function that reduces all channels into a single
+            // waveform
+            draw_combined_waveform(&png, data);
+        } else {
+            // otherwise, draw them all stacked individually
+            draw_waveform(&png, data);
+        }
+
+        write_png(&png);
+        close_png(&png);
     }
 
-    write_png(&png);
-    close_png(&png);
-
-    cleanup(pFormatContext, pDecoderContext);
+    free_audio_data(data);
     return 0;
 
 ERROR:

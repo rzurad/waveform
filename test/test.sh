@@ -42,7 +42,8 @@ for f in $FILES
 do
     echo "generating waveforms for $f..."
 
-    run "$f" "$f.max_height.png" "-h 800 -t 600 -w 1600"
+    #run "$f" "$f.max_height.png" "-h 800 -t 600 -w 1600"
+    ../waveform -i "$f" -d
 
     if [ "$all" == "all" ];
     then
@@ -51,6 +52,15 @@ do
         run "$f" "$f.fixed.png" "-h 800 -w 1600"
     fi
 done
+
+# test color options
+echo "testing color options..."
+run "$file" "$file.COLORTEST.png" "-h 800 -w 1600 -c 89d1f3ff -b 474b50ff"
+run "$file" "$file.COLOR_ALPHA_TEST.png" "-h 800 -w 1600 -c 000000ff -b 00000000"
+
+echo "testing metadata option..."
+# make sure if -d is there, everything else except -i is safely ignored
+../waveform -i "$file" -m -d -h 800 -w 1600 -t 600 -c 000000ff -b ffffffff -m
 
 # generate different sizes of thumbnails to show how the waveform changes
 # with the quantization resolution
