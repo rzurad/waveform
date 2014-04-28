@@ -1,3 +1,15 @@
+Audio waveform image generator
+====
+
+    ./waveform -i 1hz-10khz-sweep.flac -h 400 -w 1600 -m -c 89d1f3ff -b 474b50ff
+![](test/examples/1hz-10khz-sweep.png)
+
+    ./waveform -i dialup.wav -h 400 -w 1600 -c ffffffff -b 000000ff
+![](test/examples/dialup.png)
+
+How to use
+===
+
 **Name**
 
     waveform - generates a png image of the waveform of a given audio file.
@@ -9,7 +21,9 @@
 **Description**
 
     Waveform uses ffmpeg and libpng to read an audio file and output a png
-    image of the waveform representing the audio file's contents.
+    image of the waveform representing the audio file's contents. Any audio
+    container/codec combination that can be read by your build of ffmpeg
+    should be supported.
 
     The fidelity of the produced waveform will be determined by the
     dimensions of the output png. Larger images will have more waveform
@@ -21,21 +35,25 @@
     audio file with the height of the image determined by the number of
     channels in the input file.
 
+    Waveform can also be used to get accurate data about the given input file
+    (more accurate than ffprobe can be depending on the input format) via
+    the -d option.
 
 **Options**
 
-    -i FILE
-            Input file to parse. Can be any format/codec that can be read by
-            the installed ffmpeg.
+    -b HEX [default ffffffff]
+            Set the background color of the image. Color is specified in hex
+            format: RRGGBBAA or 0xRRGGBBAA.
 
-    -o FILE
-            Output file for PNG. If -o is omitted, the png will be written
-            to stdout.
+    -c HEX [default 595959ff]
+            Set the color of the waveform. Color is specified in hex format:
+            RRGGBBAA or 0xRRGGBBAA
 
-    -m
-            Produce a single channel waveform. Each channel will be averaged
-            together to produce the final channel. The -h and -t options
-            behave as they would when supplied a monaural file.
+    -d
+            Do not generate an image, but instead print out file metadata to
+            standard out. This is mostly useful to find the actual duration
+            of an input file, since ffprobe can occasionally be inaccurate in
+            its prediction of duration.
 
     -h NUM
             Height of output image. The height of each channel will be
@@ -50,6 +68,19 @@
             height of -t multiplied by the number of channels in the input
             file. If not, the output image will have a height of -h.
 
+    -i FILE
+            Input file to parse. Can be any format/codec that can be read by
+            the installed ffmpeg.
+
+    -o FILE
+            Output file for PNG. If -o is omitted, the png will be written
+            to stdout.
+
+    -m
+            Produce a single channel waveform. Each channel will be averaged
+            together to produce the final channel. The -h and -t options
+            behave as they would when supplied a monaural file.
+
     -t NUM [default 64]
             Height of each track in the output image. The final height of the
             output png will be this value multiplied by the number of channels
@@ -62,14 +93,6 @@
 
     -w NUM [default 256]
             Width of output PNG image
-
-    -c HEX [default 595959ff]
-            Set the color of the waveform. Color is specified in hex format:
-            RRGGBBAA or 0xRRGGBBAA
-
-    -b HEX [default ffffffff]
-            Set the background color of the image. Color is specified in hex
-            format: RRGGBBAA or 0xRRGGBBAA.
 
 Dependencies:
 ====
@@ -116,17 +139,44 @@ Calling waveform with the following options on a stereo file produces the follow
     ./waveform -i parachute.mp3 -h 800 -t 600 -w 1600 -b f3f3f3ff
 ![](test/examples/parachute.png)
 
-Notice that since this was a stereo file and 600 * 2 > 800, the final image size is restricted to 800 pixels. However, if we make the same call supplying a mono mix of the same file, the output image has a height of 600, since 600 * 1 / 2 < 800.
+Notice that since this was a stereo file and 600 * 2 > 800, the final image size is restricted to 800 pixels. However, if we make the same call supplying a mono mix of the same file, the output image has a height of 600, since 600 * 1 < 800.
 
     ./waveform -i parachute_mono.mp3 -h 800 -t 600 -w 1600 -b f3f3f3ff
 ![](test/examples/parachute_mono.png)
 
-More examples:
+Print file info/metadata
 ----
+Ffmpeg may sometimes not be able to accurately guess the duration of an input file for a variety of reasons, which can lead to some discrepencies if ffprobe's duration is used to gague how much time the output image represents. Since waveform needs to uncompress all samples to do its thing anyway, this allows it to accurately determine how much sample data is actually in the audio file, regardless of what its header or ffmpeg's prediction says.
 
-    ./waveform -i 1hz-10khz-sweep.flac -h 400 -w 1600 -m -c 89d1f3ff -b 474b50ff
-![](test/examples/1hz-10khz-sweep.png)
+For example, let's send a problematic mp3 into ffprobe to see its duration:
 
-    ./waveform -i dialup.wav -h 400 -w 1600 -c ffffffff -b 000000ff
-![](test/examples/dialup.png)
+    ffprobe -i midnight_city.mp3
 
+which outputs:
+
+    [mp3 @ 0x80b02f420] Estimating duration from bitrate, this may be inaccurate
+    Input #0, mp3, from 'midnight-city.mp3':
+      Duration: 00:04:18.75, start: 0.000000, bitrate: 255 kb/s
+        Stream #0:0: Audio: mp3, 44100 Hz, stereo, s16p, 256 kb/s
+
+Notice that ffprobe reports the duration as 4 minutes, **18.75 seconds**. But if we tell ffmpeg to attempt a transcode, we see that this is not the real duration at all:
+
+    ffmpeg -i midnight_city.mp3 -f null -
+
+which outputs many things, but of primary interest is:
+
+    [null @ 0x80b03ea20] Encoder did not produce proper pts, making some up.
+    frame=    1 fps=0.0 q=0.0 Lsize=N/A time=00:04:02.72 bitrate=N/A
+
+which reveals the actual duration of the file: 4 minutes, **2.72 seconds**. Since Waveform reads all of the raw data anyway, it is in a position to know that the actual duration is 4:02. Calling waveform with the -d option gives us this information:
+
+    ./waveform -i test/data/midnight-city.mp3 -d
+    [mp3 @ 0x807419420] Estimating duration from bitrate, this may be inaccurate
+    [mp3 @ 0x807441120] Header missing
+        Duration       : 242.729796 seconds
+        Compression    : mp3
+        Sample rate    : 44100 Hz
+        Channels       : 2
+        Bit rate       : 255999 b/s
+
+Waveform shows a duration of 242.73 seconds, which comes out to 4 minutes, 2.73 seconds.
