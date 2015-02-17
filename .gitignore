@@ -1,3 +1,6 @@
+*.gz
+autom4te.cache
+.DS_Store
 waveform
 *.core
 *.swp
