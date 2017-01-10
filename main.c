@@ -639,7 +639,7 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
 
     av_init_packet(&packet);
 
-    if (!(pFrame = avcodec_alloc_frame())) {
+    if (!(pFrame = av_frame_alloc())) {
         fprintf(stderr, "Could not allocate AVFrame\n");
         free_audio_data(data);
         return;
@@ -731,6 +731,8 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
 
     data->size = total_size;
     data->sample_rate = raw_sample_rate;
+
+    av_frame_free(&pFrame);
 
     if (total_size == 0) {
         // not a single packet could be read.
