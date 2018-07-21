@@ -37,7 +37,7 @@
 png_byte color_waveform[4] = {89, 89, 89, 255};
 png_byte color_bg[4] = {255, 255, 255, 255};
 
-char version[] = "Waveform 0.9.1";
+char version[] = "Waveform 0.9.2";
 
 // struct for creating PNG images.
 typedef struct WaveformPNG {
@@ -672,7 +672,7 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
 
         // Skip packets from other streams
         if (packet.stream_index != data->stream_index) {
-            continue;
+            goto FREEPACKET;
         }
 
         // some audio formats might not contain an entire raw frame in a single compressed packet.
@@ -683,7 +683,7 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
         // Use the decoder to populate the raw frame with data from the compressed packet.
         if (avcodec_decode_audio4(data->decoder_context, pFrame, &frame_finished, &packet) < 0) {
             // unable to decode this packet. continue on to the next packet
-            continue;
+            goto FREEPACKET;
         }
 
         // did we get an entire raw frame from the packet?
@@ -737,6 +737,7 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
             }
         }
 
+    FREEPACKET:
         // Packets must be freed, otherwise you'll have a fix a hole where the rain gets in
         // (and keep your mind from wandering...)
         av_free_packet(&packet);
