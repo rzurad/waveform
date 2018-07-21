@@ -37,7 +37,7 @@
 png_byte color_waveform[4] = {89, 89, 89, 255};
 png_byte color_bg[4] = {255, 255, 255, 255};
 
-char version[] = "Waveform 0.9.1";
+char version[] = "Waveform 0.9.2";
 
 // struct for creating PNG images.
 typedef struct WaveformPNG {
@@ -122,6 +122,12 @@ typedef struct AudioData {
      * audio data.
      */
     AVCodecContext *decoder_context;
+
+    /*
+     * Index of a stream to read
+     */
+    int stream_index;
+
 } AudioData;
 
 
@@ -570,11 +576,12 @@ void help() {
  * Take an ffmpeg AVFormatContext and AVCodecContext struct and create and AudioData struct
  * that we can easily work with
  */
-AudioData *create_audio_data_struct(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
+AudioData *create_audio_data_struct(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext, int stream_index) {
     // Make the AudioData object we'll be returning
     AudioData *data = malloc(sizeof(AudioData));
     data->format_context = pFormatContext;
     data->decoder_context = pDecoderContext;
+    data->stream_index = stream_index;
     data->format = pDecoderContext->sample_fmt;
     data->sample_size = (int) av_get_bytes_per_sample(pDecoderContext->sample_fmt); // *byte* depth
     data->channels = pDecoderContext->channels;
@@ -662,6 +669,12 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
     // It's up to anything using the AudioData struct to know how to properly read the data
     // inside `samples`
     while (av_read_frame(data->format_context, &packet) == 0) {
+
+        // Skip packets from other streams
+        if (packet.stream_index != data->stream_index) {
+            goto FREEPACKET;
+        }
+
         // some audio formats might not contain an entire raw frame in a single compressed packet.
         // If this is the case, then decode_audio4 will tell us that it didn't get all of the
         // raw frame via this out argument.
@@ -670,7 +683,7 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
         // Use the decoder to populate the raw frame with data from the compressed packet.
         if (avcodec_decode_audio4(data->decoder_context, pFrame, &frame_finished, &packet) < 0) {
             // unable to decode this packet. continue on to the next packet
-            continue;
+            goto FREEPACKET;
         }
 
         // did we get an entire raw frame from the packet?
@@ -724,6 +737,7 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
             }
         }
 
+    FREEPACKET:
         // Packets must be freed, otherwise you'll have a fix a hole where the rain gets in
         // (and keep your mind from wandering...)
         av_free_packet(&packet);
@@ -878,7 +892,7 @@ int main(int argc, char *argv[]) {
         goto ERROR;
     }
 
-    AudioData *data = create_audio_data_struct(pFormatContext, pDecoderContext);
+    AudioData *data = create_audio_data_struct(pFormatContext, pDecoderContext, stream_index);
 
     if (data == NULL) {
         goto ERROR;
