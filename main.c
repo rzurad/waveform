@@ -122,6 +122,12 @@ typedef struct AudioData {
      * audio data.
      */
     AVCodecContext *decoder_context;
+
+    /*
+     * Index of a stream to read
+     */
+    int stream_index;
+
 } AudioData;
 
 
@@ -570,11 +576,12 @@ void help() {
  * Take an ffmpeg AVFormatContext and AVCodecContext struct and create and AudioData struct
  * that we can easily work with
  */
-AudioData *create_audio_data_struct(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext) {
+AudioData *create_audio_data_struct(AVFormatContext *pFormatContext, AVCodecContext *pDecoderContext, int stream_index) {
     // Make the AudioData object we'll be returning
     AudioData *data = malloc(sizeof(AudioData));
     data->format_context = pFormatContext;
     data->decoder_context = pDecoderContext;
+    data->stream_index = stream_index;
     data->format = pDecoderContext->sample_fmt;
     data->sample_size = (int) av_get_bytes_per_sample(pDecoderContext->sample_fmt); // *byte* depth
     data->channels = pDecoderContext->channels;
@@ -662,6 +669,12 @@ static void read_raw_audio_data(AudioData *data, int populate_sample_buffer) {
     // It's up to anything using the AudioData struct to know how to properly read the data
     // inside `samples`
     while (av_read_frame(data->format_context, &packet) == 0) {
+
+        // Skip packets from other streams
+        if (packet.stream_index != data->stream_index) {
+            continue;
+        }
+
         // some audio formats might not contain an entire raw frame in a single compressed packet.
         // If this is the case, then decode_audio4 will tell us that it didn't get all of the
         // raw frame via this out argument.
@@ -878,7 +891,7 @@ int main(int argc, char *argv[]) {
         goto ERROR;
     }
 
-    AudioData *data = create_audio_data_struct(pFormatContext, pDecoderContext);
+    AudioData *data = create_audio_data_struct(pFormatContext, pDecoderContext, stream_index);
 
     if (data == NULL) {
         goto ERROR;
